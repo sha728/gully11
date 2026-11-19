@@ -7,10 +7,10 @@ player gets:
   leagues) plus a share of the whole career, each scored against specialists in
   that skill and pulled toward an ordinary player when the sample is small, plus
   a reputation term for IPL and T20I experience;
-* a **fair price**: value rank mapped onto a price curve that starts at 20 crore
+* a **fair price**: value rank mapped onto a price curve that starts at 15 crore
   and falls so that a full set of squads is worth about 92% of the room's money
-  (for ten teams: the 20th player about 14 crore, the 60th about 7, the 100th
-  about 3.4);
+  (for ten teams: the 20th player about 11.7 crore, the 60th about 7, the 100th
+  about 4.2);
 * a **base price** from the slabs in the rules (uncapped players at most 50 lakh);
 * a **set**: marquee first, then capped batters, all-rounders, keepers, fast
   bowlers and spinners in turn, then the uncapped sets.
@@ -170,7 +170,7 @@ def _round_to_grid(lakh: float, increments: list) -> int:
     return int(lakh)
 
 
-TOP_PRICE = 2000          # lakh: the best player's fair price
+TOP_PRICE = 1500          # lakh: the best player's fair price (sales run above it when bots compete)
 FLOOR_PRICE = 30
 MARKET_SHARE = 0.92       # share of all purses the fair prices of a full set of squads add up to
 SQUAD_TARGET = 21         # players per squad the market is priced for

@@ -34,9 +34,11 @@ FRANCHISES = [
 
 # How bots build a squad (players per role) and how freely they spend.
 SQUAD_PLAN = {"BAT": 6, "WK": 2, "AR": 5, "BOWL": 8}
-PERSONALITIES = {"aggressive": 1.15, "balanced": 1.0, "value": 0.88}
+PERSONALITIES = {"aggressive": 1.25, "balanced": 1.0, "value": 0.82}
 RICH_PER_SLOT = 560        # lakh per open squad slot that counts as an ordinary budget (120 cr / 21)
-MAX_OVER_FAIR = 1.4        # bots pay at most this times the fair price, plus their richness
+MAX_OVER_FAIR = 1.3        # bots pay at most this times the fair price, plus their richness
+# Chance a bot has a player on its shortlist: by how short it is of that role.
+INTEREST = {"short": 0.5, "some": 0.35, "covered": 0.12}
 
 
 class AuctionError(ValueError):
@@ -96,6 +98,8 @@ class Room:
             self.rng.shuffle(ids)
             self.sets.append((set_code, ids))
         self.queue: list[tuple[str, str]] = [(c, pid) for c, ids in self.sets for pid in ids]
+        self.fair_total = sum(p["fair"] for p in pool) or 1
+        self.fair_seen = 0                   # fair value of the lots shown so far (bots pace spending on it)
         self.total_lots = len(self.queue)
         picks = self.rng.sample(FRANCHISES, teams)
         kinds = list(PERSONALITIES)
@@ -115,6 +119,7 @@ class Room:
         self.online: set[str] | None = None  # franchises with someone connected (None = assume all)
         self._bot_due: dict[str, float] = {}
         self._noise: dict[tuple[str, str], float] = {}
+        self._interest: dict[tuple[str, str], float] = {}
         first = self.claim(host)
         self.host_token = first.token
 
@@ -189,6 +194,8 @@ class Room:
             self.queue = [("ACC", pid) for pid in again]
         set_code, pid = self.queue.pop(0)
         self.presented += 1
+        if not self.accelerated:
+            self.fair_seen += self.pool[pid]["fair"]
         self.lot = Lot(pid, set_code, self.accelerated, ends_at=now + self._timer("open"))
         self._bot_due = {}
         self._touch()
@@ -267,27 +274,45 @@ class Room:
         r = self.rules
         have = f.count(self.pool, role=p["role"])
         plan = SQUAD_PLAN[p["role"]]
-        need = 1.15 if have < plan / 2 else 1.0 if have < plan else 0.45
+        level = "short" if have < plan / 2 else "some" if have < plan else "covered"
+        need = {"short": 1.1, "some": 1.0, "covered": 0.45}[level]
         slots_left = r["squad_max"] - len(f.squad)
         short = r["squad_min"] - len(f.squad)
-        if short > 0 and self.lots_left() <= short * 3:
-            need = max(need, 1.2)            # running out of players: fill the squad
+        filling = short > 0 and self.lots_left() <= short * 3   # running out of players
+        if filling:
+            need = max(need, 1.2)
         if slots_left <= 0:
             return 0
         key = (f.id, pid)
         if key not in self._noise:
-            self._noise[key] = self.rng.uniform(0.85, 1.15)
-        # Money burns a hole: plenty of purse per slot still to fill means bidding harder.
+            # Each bot rates each player its own way and only chases its shortlist,
+            # so a lot draws a few keen bidders, not the whole room.
+            self._noise[key] = self.rng.uniform(0.65, 1.15)
+            self._interest[key] = self.rng.random()
+        # Money burns a hole: plenty of purse per slot still to fill means bidding harder
+        # and on more players.
         planned = max(1, sum(SQUAD_PLAN.values()) - len(f.squad))
-        rich = min(max((f.purse / planned) / RICH_PER_SLOT, 0.8), 4.0) ** 0.6
+        rich = min(max((f.purse / planned) / RICH_PER_SLOT, 0.8), 5.0) ** 0.85
+        rich *= self._pace(f)
+        if self._interest[key] > min(0.95, INTEREST[level] * rich) and not filling:
+            return 0
         limit = p["fair"] * need * rich * PERSONALITIES[f.personality] * self._noise[key]
         limit = min(limit, p["fair"] * (MAX_OVER_FAIR + rich - 1))
-        if short > 0:
-            limit = max(limit, p["base"])     # short of a legal squad: anyone at base will do
+        if filling:
+            limit = max(limit, p["base"])     # short of a legal squad late on: anyone at base
         reserve = max(0, r["squad_min"] - len(f.squad) - 1) * min(r["base_prices"])
         # Don't blow the purse on one player while the squad is still thin.
         spread = (f.purse - reserve) / max(1, min(short, 6)) * 2 if short > 1 else f.purse - reserve
         return int(min(limit, f.purse - reserve, max(spread, p["base"])))
+
+    def _pace(self, f: Franchise) -> float:
+        """Above 1 when a bot has spent a smaller share of its purse than the share of
+        the pool's value already auctioned: it chases more players, harder."""
+        seen = self.fair_seen / self.fair_total
+        if seen < 0.15:
+            return 1.0
+        spent = 1 - f.purse / self.rules["purse_lakh"]
+        return min(max((seen + 0.05) / (spent + 0.05), 1.0), 1.8) ** 0.7
 
     def lots_left(self) -> int:
         return len(self.queue) + (len(self.unsold) if not self.accelerated else 0)

@@ -22,7 +22,7 @@ cap, and enough purse left to fill the rest of the 18 at ₹30 L each.
 Everyone who played the IPL in 2024–2026. Value = batting and bowling from the last
 three seasons of T20s plus a third of the career, each scored against specialists in
 that skill and shrunk toward an ordinary player on small samples, plus IPL and T20I
-experience. Fair price = value rank on a curve from ₹20 cr, calibrated so a full set
+experience. Fair price = value rank on a curve from ₹15 cr, calibrated so a full set
 of 21-man squads is worth about 92% of the room's money. Pool size scales with the
 number of franchises (25 per team + 20). Afghanistan's players (no Cricsheet
 country) are filled in by hand in `nationality.csv`.
@@ -39,10 +39,13 @@ uncapped → accelerated round (unsold players again, shorter clock) → summary
 - The server owns the clock (`ends_at` plus `server_now` in every state message).
 - **Pass:** once every connected human has passed or can't bid, bots settle the lot at
   once. A friend who has closed the tab counts as passed.
-- **Bots** bid up to fair price × role need × richness (purse per open slot) ×
-  personality × noise, capped at 1.4× fair plus richness, never breaking the reserve.
-  In all-bot runs on the real pool: top prices about ₹25–27 cr, most teams spend
-  ₹95–120 cr, squads 18–25.
+- **Bots** keep a shortlist: each has its own chance of wanting each player (higher
+  when short of that role, higher still when rich or behind on spending), and its own
+  valuation (fair price × role need × richness × personality × a 0.65–1.15 rating),
+  capped at 1.3× fair plus richness and never breaking the purse reserve. So a lot
+  draws a few keen bidders, not the whole room. Personalities never leave the server.
+  In all-bot runs on the real pool: marquee players ₹9–19 cr with the odd bargain,
+  sales at about 0.9–1.0× fair on average, every bot spending ₹83–116 cr.
 
 Rooms live in the API process (a restart ends them); finished auctions are saved to
 `auction_rooms`. Several API processes would need the room state in Redis.

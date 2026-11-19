@@ -44,7 +44,14 @@ uv run python scripts/validate_sim.py --fit 2024 2025 --years 2026 2026   # simu
 # Web
 cd ../web
 npm run dev                                      # http://localhost:3000: search, player, compare, venue pages
+npm run preview                                  # production build + server: much faster for just using the app
 ```
+
+Dev mode compiles each page on first visit and doesn't cache, so it's slow to click
+around in; `npm run preview` serves pages in tens of milliseconds. The web app calls the
+API at `http://127.0.0.1:8000` (override with `NEXT_PUBLIC_API_URL`): on Windows,
+`localhost` tries IPv6 first and every call waits ~0.2 s before falling back to the
+IPv4 address Uvicorn listens on.
 
 ## CI
 

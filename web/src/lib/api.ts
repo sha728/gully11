@@ -2,7 +2,7 @@
 // for search/typeahead, from the browser.
 
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api/v1";
 
 export const FORMATS = ["Test", "ODI", "T20I", "IPL", "T20"] as const;
 export type Format = (typeof FORMATS)[number];

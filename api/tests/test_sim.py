@@ -193,3 +193,72 @@ def test_win_probability_series(env):
 
 def test_runs_lookup_matches_outcomes():
     assert RUNS == (0, 0, 1, 2, 3, 4, 6)
+
+
+# ------------------------------------------------------------- Tests (beta)
+
+def xi_side(name, env):
+    return avg_team(name, env, ["BAT", "BAT", "BAT", "BAT", "WK", "AR", "AR", "BOWL", "BOWL", "BOWL", "BOWL"])
+
+
+def test_test_matches_follow_the_laws():
+    from gully_api.sim import simulate_test
+    from gully_api.sim.engine import TEST_MATCH_OVERS
+    env = load_env("Test")
+    a, b = xi_side("A", env), xi_side("B", env)
+    results = Counter()
+    for seed in range(60):
+        r = simulate_test(a, b, env, seed)
+        results[r.result] += 1
+        assert 2 <= len(r.innings) <= 4
+        assert sum(i.legal_balls for i in r.innings) <= TEST_MATCH_OVERS * 6
+        assert r.win_prob == []                                  # no win-probability model for Tests
+        for inn in r.innings:
+            assert inn.wickets <= 10
+            assert sum(x.runs for x in inn.bat.values()) + sum(inn.extras.values()) == inn.runs
+        if r.result == "win":
+            assert r.winner in r.teams and r.margin.startswith("won by")
+        elif r.result == "draw":
+            assert r.winner is None and r.margin == "match drawn"
+        if len(r.innings) == 4 and r.winner == r.innings[3].batting:
+            assert r.innings[3].runs >= r.innings[3].target
+        if "innings" in r.margin:                                # beaten by an innings: 3 innings only
+            assert len(r.innings) == 3
+    assert results["win"] > 30                                   # most Tests have a winner
+
+
+def test_test_match_is_deterministic_and_separate_from_limited_overs():
+    from gully_api.sim import simulate_test
+    env = load_env("Test")
+    a, b = xi_side("A", env), xi_side("B", env)
+    assert simulate_test(a, b, env, 5).to_dict() == simulate_test(a, b, env, 5).to_dict()
+    with pytest.raises(ValueError, match="simulate_test"):
+        simulate_match(a, b, env, 1)
+    with pytest.raises(ValueError, match="simulate_match"):
+        simulate_test(a, b, load_env("ODI"), 1)
+
+
+def test_follow_on_and_declarations_happen():
+    """A far stronger side should sometimes enforce the follow-on, and declare."""
+    from gully_api.sim import simulate_test
+    env = load_env("Test")
+    strong = career_team("S", env, bat_avg=60, bat_sr=60, bowl_avg=20, bowl_econ=2.6)
+    weak = career_team("W", env, bat_avg=18, bat_sr=45, bowl_avg=45, bowl_econ=3.8)
+    follow_ons = declarations = 0
+    for seed in range(40):
+        r = simulate_test(strong, weak, env, seed, bat_first=0)
+        declarations += any(i.declared for i in r.innings)
+        if len(r.innings) >= 3 and r.innings[2].batting == r.innings[1].batting:
+            follow_ons += 1
+    assert follow_ons > 0 and declarations > 0
+
+
+def test_legend_profile_reproduces_career():
+    from gully_api.sim import from_legend
+    env = load_env("Test")
+    p = from_legend({"id": "L-x", "name": "X", "role": "BOWL", "bat_avg": 7.4, "bat_sr": None,
+                     "wickets": 563, "bowl_avg": 21.6, "bowl_econ": 2.49}, env)
+    vec = [sum(p.bowl[ph][i] for ph in PHASES) / 3 for i in range(7)]
+    rpb, w = expected(vec)
+    assert rpb / w == pytest.approx(21.6, rel=0.05) and 6 * rpb == pytest.approx(2.49, rel=0.05)
+    assert p.estimated and p.meta["sr_estimated"]

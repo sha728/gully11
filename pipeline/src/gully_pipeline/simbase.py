@@ -22,6 +22,7 @@ from pathlib import Path
 
 import duckdb
 
+from .aggregate import TEST_PHASE
 from .paths import PIPELINE_ROOT
 
 OUT_PATH = PIPELINE_ROOT.parent / "api" / "src" / "gully_api" / "sim" / "data" / "base_rates.json"
@@ -34,6 +35,7 @@ ENVS = {
     "IPL_recent": ("IPL", 2024, 2026, 20),
     "ODI": ("ODI", None, None, 50),
     "ODI_recent": ("ODI", 2023, 2026, 50),
+    "Test": ("Test", None, None, 0),     # overs 0 = no limit (two innings each)
 }
 # Resource (remaining-runs) tables are built on the large all-time format sets
 # and rescaled per environment by its average first-innings total.
@@ -47,7 +49,8 @@ def _env_view(con, fmt: str, y0: int | None, y1: int | None) -> None:
     yr = f"AND year(start_date) BETWEEN {y0} AND {y1}" if y0 else ""
     con.execute(f"""
         CREATE OR REPLACE TEMP VIEW e AS
-        SELECT d.* FROM d JOIN match_formats f USING (match_id)
+        SELECT d.* EXCLUDE (phase), {TEST_PHASE.format(table='d')} AS phase
+        FROM d JOIN match_formats f USING (match_id)
         WHERE f.format = '{fmt}' {yr}
     """)
 
@@ -125,8 +128,8 @@ def _full_first_innings(con, overs: int) -> str:
             FROM e WHERE innings = 1 GROUP BY 1
         )
         SELECT inn.* FROM inn JOIN m USING (match_id)
-        WHERE m.overs = {overs} AND m.method IS NULL
-          AND (inn.wkts >= 10 OR inn.legal >= {overs * 6})
+        WHERE {"m.result IS NOT NULL" if overs == 0 else
+               f"m.overs = {overs} AND m.method IS NULL AND (inn.wkts >= 10 OR inn.legal >= {overs * 6})"}
     """
 
 
@@ -139,6 +142,29 @@ def _score_dist(con, overs: int) -> dict:
     """).fetchone()
     keys = ["innings", "mean", "sd", "p10", "p50", "p90", "mean_wickets"]
     return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in zip(keys, r)}
+
+
+def _test_shape(con) -> dict:
+    """How real Tests unfold, for validating the Test engine: per-innings averages
+    (runs, overs, wickets, share not all out) and the draw rate."""
+    rows = con.execute(f"""
+        WITH i AS (
+            SELECT match_id, innings, sum(runs_total) AS r, count(*) FILTER (WHERE is_legal) AS b,
+                   count(*) FILTER (WHERE is_wicket AND wicket_kind NOT IN {RETIRED}) AS w
+            FROM e GROUP BY ALL
+        )
+        SELECT innings, count(*), avg(r), avg(b) / 6.0, avg(w), avg((w < 10)::INT),
+               6.0 * sum(r) / sum(b), sum(w) / sum(b)
+        FROM i WHERE innings <= 4 GROUP BY 1 ORDER BY 1
+    """).fetchall()
+    draws = con.execute("""
+        SELECT avg((result = 'draw')::INT) FROM m
+        WHERE match_id IN (SELECT DISTINCT match_id FROM e) AND result IS NOT NULL
+    """).fetchone()[0]
+    # run_rate / wicket_rate per innings drive the engine's pitch-wear factors.
+    keys = ["innings", "n", "runs", "overs", "wickets", "not_all_out", "run_rate", "wicket_rate"]
+    return {"innings": [{k: (round(v, 5) if isinstance(v, float) else v) for k, v in zip(keys, r)} for r in rows],
+            "draw_rate": round(draws, 3)}
 
 
 def _resources(con, overs: int) -> dict:
@@ -226,6 +252,7 @@ def build_simbase(parquet_dir: Path, db_path: Path, out: Path = OUT_PATH) -> dic
     result: dict = {"envs": {}, "resources": {}, "phases": {
         "20": [[0, "PP"], [6, "middle"], [15, "death"]],
         "50": [[0, "PP"], [10, "middle"], [40, "death"]],
+        "0": [[0, "PP"], [15, "middle"], [80, "death"]],   # Tests: new / middle / old ball
     }}
     with duckdb.connect(str(db_path), read_only=True) as con:
         con.execute(f"""
@@ -235,17 +262,19 @@ def build_simbase(parquet_dir: Path, db_path: Path, out: Path = OUT_PATH) -> dic
         """)
         for name, (fmt, y0, y1, overs) in ENVS.items():
             _env_view(con, fmt, y0, y1)
+            family = {"Test": "Test", "ODI": "ODI"}.get(fmt, "T20")
             result["envs"][name] = {
-                "format": fmt, "years": [y0, y1] if y0 else None, "overs": overs,
+                "format": fmt, "family": family, "years": [y0, y1] if y0 else None, "overs": overs,
                 "phases": _phase_counts(con),
                 "extras": _extras(con),
                 "first_innings": _score_dist(con, overs),
+                **({"test_shape": _test_shape(con)} if overs == 0 else {}),
             }
         for overs, env in RESOURCE_BASE.items():
             fmt, y0, y1, _ = ENVS[env]
             _env_view(con, fmt, y0, y1)
             result["resources"][str(overs)] = {"env": env, **_resources(con, overs)}
-        result["priors"] = {fmt: _priors(con, fmt) for fmt in ("T20", "ODI")}
+        result["priors"] = {fmt: _priors(con, fmt) for fmt in ("T20", "ODI", "Test")}
         result["prior_thresholds"] = {"bat_balls": PRIOR_BAT_BALLS, "bowl_balls": PRIOR_BOWL_BALLS}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, separators=(",", ":")))

@@ -23,7 +23,15 @@ from pathlib import Path
 
 import duckdb
 
-FORMATS_SQL = """
+# Tests have no powerplay or death overs, so Cricsheet phases are null. Reuse the same
+# three labels for the age of the ball: new ball (overs 0-14 of an innings), middle
+# (15-79) and old ball (80+, around the second new ball). Real Tests since 2001: runs
+# per over 3.2 / 3.3 / 3.5, balls per wicket 58 / 63 / 52 across those spans.
+TEST_PHASE = ("CASE WHEN {table}.phase IS NULL AND {table}.match_type = 'Test' THEN "
+              "CASE WHEN {table}.over < 15 THEN 'PP' WHEN {table}.over < 80 THEN 'middle' "
+              "ELSE 'death' END ELSE {table}.phase END")
+
+FORMATS_SQL = f"""
 CREATE OR REPLACE TABLE match_formats AS
     SELECT match_id, season, 'Test' AS format FROM m WHERE match_type = 'Test'
     UNION ALL SELECT match_id, season, 'ODI'  FROM m WHERE match_type = 'ODI'
@@ -33,7 +41,8 @@ CREATE OR REPLACE TABLE match_formats AS
     UNION ALL SELECT match_id, season, 'T20'  FROM m WHERE match_type IN ('T20', 'IT20');
 
 CREATE OR REPLACE TEMP VIEW fd AS
-    SELECT f.format, d.* FROM d JOIN match_formats f USING (match_id);
+    SELECT f.format, d.* EXCLUDE (phase), {TEST_PHASE.format(table='d')} AS phase
+    FROM d JOIN match_formats f USING (match_id);
 
 CREATE OR REPLACE TEMP TABLE squad AS
     SELECT DISTINCT f.format, f.season, mp.match_id, mp.player_id AS pid
@@ -274,14 +283,14 @@ _FORM_CATS = ["wickets", "dots", "ones", "twos", "threes", "fours", "sixes"]
 # competition, so league-adjusted ratings read as "vs the IPL average" (T20) or
 # "vs full-member internationals" (ODI). Strength is per competition, not per
 # year (more stable; ageing would otherwise leak into year factors).
-LEAGUE_REF = {"T20": "Indian Premier League", "ODI": "intl-full"}
+LEAGUE_REF = {"T20": "Indian Premier League", "ODI": "intl-full", "Test": "intl-full"}
 LEAGUE_ITERATIONS = 60
 K_LEAGUE_PLAYER = 300    # balls of prior pulling a player's rating toward 1 in the fit
 K_LEAGUE_CTX = 2000      # balls of prior pulling a competition's factor toward 1
 
 
 def _fam(col: str) -> str:
-    return f"CASE WHEN {col} = 'ODI' THEN 'ODI' ELSE 'T20' END"
+    return f"CASE {col} WHEN 'ODI' THEN 'ODI' WHEN 'Test' THEN 'Test' ELSE 'T20' END"
 
 
 def league_strength(con) -> dict:
@@ -296,7 +305,7 @@ def league_strength(con) -> dict:
             SELECT '{role}' AS role, {_fam('p.format')} AS fam, p.pid, p.ctx,
                    unnest({cats}) AS cat, unnest({obs}) AS o, unnest({exp}) AS x, p.balls
             FROM {pc} p JOIN {ctx} c USING (format, ctx, yr, phase)
-            WHERE p.format IN ('T20', 'ODI') AND c.balls > 0""")
+            WHERE p.format IN ('T20', 'ODI', 'Test') AND c.balls > 0""")
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE ls_obs AS
         SELECT role, fam, pid, ctx, cat, sum(o) AS o, sum(x) AS x, sum(balls) AS balls
@@ -318,7 +327,7 @@ def league_strength(con) -> dict:
         GROUP BY o.role, o.fam, o.pid, o.cat, q.rate;
     """
     con.execute(r_update)
-    ref = f"CASE s.fam WHEN 'ODI' THEN '{LEAGUE_REF['ODI']}' ELSE '{LEAGUE_REF['T20']}' END"
+    ref = f"CASE s.fam WHEN 'T20' THEN '{LEAGUE_REF['T20']}' ELSE '{LEAGUE_REF['ODI']}' END"
     change = float("inf")
     it = 0
     for it in range(1, LEAGUE_ITERATIONS + 1):
@@ -709,6 +718,39 @@ ORDER BY player_id, format, runs DESC;
 """
 
 
+def legends_sql(csv_path: Path) -> str:
+    """Pre-2001 greats from reference/legends.csv (Wikipedia infoboxes), one row per
+    player and format. ``cricsheet_id`` links a legend to the same person in the
+    ball-by-ball data (full name AND country must match), so an XI can't hold both."""
+    return f"""
+CREATE OR REPLACE TABLE legends AS
+WITH l AS (
+    SELECT 'L-' || regexp_replace(regexp_replace(lower(name), '[^a-z0-9]+', '-', 'g'), '(^-|-$)', '', 'g') AS id, *
+    FROM read_csv('{csv_path.as_posix()}', header = true)
+)
+SELECT l.id, (SELECT p.id FROM players p WHERE p.full_name = l.name AND p.country = l.country LIMIT 1) AS cricsheet_id,
+       l.name, l.country, l.format, l.matches::INTEGER AS matches, l.runs::INTEGER AS runs, l.bat_avg,
+       l.bat_sr, l.hundreds::INTEGER AS hundreds, l.fifties::INTEGER AS fifties, l.highest::INTEGER AS highest,
+       l.balls_bowled::INTEGER AS balls_bowled, l.wickets::INTEGER AS wickets, l.bowl_avg, l.bowl_econ,
+       l.bowl_sr, l.best_bowling, l.catches::INTEGER AS catches, l.stumpings::INTEGER AS stumpings,
+       l.role, l.batting_hand, l.bowling_arm, l.bowling_type,
+       l.format_start::INTEGER AS format_start, l.format_end::INTEGER AS format_end,
+       l.era_start::INTEGER AS era_start, l.era_end::INTEGER AS era_end, l.source_url
+FROM l ORDER BY l.name, l.format;
+"""
+
+
+PLAYER_TEAMS_SQL = """
+-- Who played for which side, per format and season (country for internationals,
+-- franchise for leagues). Drives IPL drafting and nationality hints.
+CREATE OR REPLACE TABLE player_teams AS
+SELECT mp.player_id, f.format, f.season, mp.team, count(DISTINCT mp.match_id)::INTEGER AS matches
+FROM mp JOIN match_formats f USING (match_id)
+WHERE mp.player_id IS NOT NULL
+GROUP BY ALL ORDER BY player_id, format, season;
+"""
+
+
 def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
     """Build all player tables into ``db_path``. Returns row counts per table."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -745,7 +787,9 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         con.execute(form_sql([(a, h) for a in as_ofs for h in FORM_HALF_LIVES]))
         con.execute(PLAYERS_SQL)
         con.execute(venues_sql())
+        con.execute(legends_sql(Path(__file__).resolve().parents[2] / "reference" / "legends.csv"))
+        con.execute(PLAYER_TEAMS_SQL)
         tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats",
                   "player_phase_form", "league_strength", "venues", "venue_format_stats",
-                  "player_dismissals", "player_venue_stats"]
+                  "player_dismissals", "player_venue_stats", "legends", "player_teams"]
         return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}

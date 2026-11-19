@@ -33,6 +33,8 @@ TABLES = {
     "venue_format_stats": "SELECT * FROM venue_format_stats",
     "player_dismissals": "SELECT * FROM player_dismissals",
     "player_venue_stats": "SELECT * FROM player_venue_stats",
+    "legends": "SELECT * FROM legends",
+    "player_teams": "SELECT * FROM player_teams",
 }
 
 

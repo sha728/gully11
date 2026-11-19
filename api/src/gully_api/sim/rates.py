@@ -19,8 +19,8 @@ PHASES = ("PP", "middle", "death")
 DATA_PATH = Path(__file__).parent / "data" / "base_rates.json"
 CALIBRATION_PATH = Path(__file__).parent / "data" / "calibration.json"
 
-# Which all-time environment player career stats are measured against.
-FAMILY = {20: "T20", 50: "ODI"}
+# Each environment belongs to a family (T20, ODI or Test): the all-time environment
+# whose baseline player ratings in that family are measured against.
 
 
 def counts_to_vector(c: dict) -> list[float]:
@@ -70,6 +70,19 @@ class Env:
     calibration: dict[str, tuple] = None  # type: ignore[assignment]
     # Spread (log scale) of the per-match conditions factor on boundary rates.
     conditions_sd: float = 0.0
+    family: str = "T20"                 # T20 / ODI / Test: which player stats apply
+    test_shape: dict | None = None      # real per-innings averages (Tests only)
+    # Tests: (probability a match loses time, most overs it can lose); fitted.
+    test_weather: tuple[float, float] = (0.0, 0.0)
+
+    def with_weather(self, p: float, max_lost: float) -> "Env":
+        from dataclasses import replace
+        return replace(self, test_weather=(p, max_lost))
+
+    @property
+    def is_test(self) -> bool:
+        """Tests have no over limit (overs == 0): two innings each, declarations."""
+        return self.overs == 0
 
     def __post_init__(self):
         if self.calibration is None:
@@ -115,8 +128,10 @@ def load_env(name: str) -> Env:
         raise ValueError(f"Unknown environment {name!r}; choose from {env_names()}")
     e = raw["envs"][name]
     overs = e["overs"]
-    base = raw["envs"][FAMILY[overs]]
-    res = raw["resources"][str(overs)]
+    family = e.get("family") or {20: "T20", 50: "ODI"}[overs]
+    base = raw["envs"][family]
+    # Remaining-runs tables (win probability, chase intent) exist for limited overs only.
+    res = raw["resources"].get(str(overs), {"env": family, "mean": [], "sd": []})
     # Rescale the all-time remaining-runs table to this environment's scoring level.
     scale = e["first_innings"]["mean"] / raw["envs"][res["env"]]["first_innings"]["mean"]
 
@@ -141,7 +156,10 @@ def load_env(name: str) -> Env:
         first_innings=e["first_innings"],
         res_mean=[[m * scale for m in row] for row in res["mean"]],
         res_sd=[[s * scale for s in row] for row in res["sd"]],
-        priors={k: tuple(v) for k, v in raw["priors"][FAMILY[overs]].items()},
+        priors={k: tuple(v) for k, v in raw["priors"][family].items()},
+        family=family,
+        test_shape=e.get("test_shape"),
+        test_weather=tuple(_calibration().get(name, {}).get("weather", (0.0, 0.0))),
         prior_bat_balls=raw["prior_thresholds"]["bat_balls"],
         prior_bowl_balls=raw["prior_thresholds"]["bowl_balls"],
         calibration=_calibration().get(name, {}).get("multipliers"),
@@ -154,5 +172,6 @@ def _calibration() -> dict:
         return {}
     data = json.loads(CALIBRATION_PATH.read_text())
     return {env: {"multipliers": {p: tuple(v) for p, v in c["multipliers"].items()},
-                  "conditions_sd": c.get("conditions_sd", 0.0)}
+                  "conditions_sd": c.get("conditions_sd", 0.0),
+                  "weather": (c["weather"]["p"], c["weather"]["max_lost"]) if "weather" in c else (0.0, 0.0)}
             for env, c in data.items()}

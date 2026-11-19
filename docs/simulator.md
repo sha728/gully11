@@ -116,6 +116,49 @@ environment exactly (unit-tested), so the excess comes from the player ratings.
 Careers built partly in weaker competitions make strong players look a bit
 stronger with bat and ball.
 
+## Tests (beta)
+
+`simulate_test` plays two innings each inside 450 overs, on the same ball-by-ball
+model:
+
+- **Phases:** the three labels mean the age of the ball in Tests: new (overs 0–14),
+  middle (15–79) and old (80+). Players get Test phase ratings like any other format.
+- **Pitch wear:** per-innings wicket and scoring factors are measured from real
+  Tests. Balls per wicket fall from 65 to 61, 55 and 53 across the four innings.
+- **Declarations (design choices):**
+  - first innings at 600, or 500 after 140 overs
+  - second innings once 250 ahead with 450+ on the board
+  - third innings when the target needs about 3.6 an over in the time left, or the
+    lead passes 450
+- **Follow-on:** enforced at a 200-run lead when 150+ overs remain.
+- **Fourth-innings intent:** chasers go for gettable targets and block for the draw
+  when the rate passes 5 an over, or 4 with six wickets down.
+- **Weather (design choice):** with probability p a match loses up to 200 overs. p is
+  fitted to the real draw rate.
+- **Calibration:** per-phase outcome multipliers, fitted like the IPL's.
+  `scripts/validate_test_sim.py --fit 2023 2024 --years 2025 2026`
+
+Holdout, 63 Tests from 2025–26:
+
+| Innings | Runs | Overs |
+| --- | --- | --- |
+| 1st | +6% | +6% |
+| 2nd | −2% | +2% |
+| 3rd | −11% | −8% |
+| 4th | +2% | +2% |
+
+The draw rate came out at 14% against a real 8%. The fit seasons had 9.6% draws,
+and two seasons of 60–80 Tests make that noisy. The weather probability also sat
+at the top of the fitted grid (0.6). Treat the draw rate as approximate.
+
+## Legends
+
+`from_legend` builds a profile from career figures (`legends` table, Wikipedia). Most
+pre-2001 strike rates were never recorded, so a missing one is estimated: the format's
+league-average rate, nudged by batting average. Bradman comes out at about 59. Such
+players are marked `estimated` and `sr_estimated`. Bowling reproduces career average
+and economy (McGrath 21.6 at 2.49).
+
 ## Known gaps / next steps
 
 - **Still overconfident.** Brier is about 0.27 against a coin flip's 0.25:

@@ -59,3 +59,10 @@ def apply_app_schema() -> None:
             conn.execute(APP_SCHEMA.read_text())
     except Exception as e:  # pragma: no cover - startup without a database
         logging.getLogger(__name__).warning("app schema not applied: %s", e)
+
+
+def connection():
+    """A pooled connection outside a request (background tasks)."""
+    if _pool is None:
+        raise RuntimeError("database pool not open (app startup did not run)")
+    return _pool.connection()

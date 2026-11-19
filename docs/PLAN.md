@@ -247,7 +247,7 @@ The simulator comes before both game modes because the XI series and the post-au
 
 **Open questions**
 
-- [ ] Exact IPL bid increment slabs and the mega-auction purse figure: confirm from the official player regulations.
+- [x] Exact IPL bid increment slabs and the mega-auction purse figure: ₹5/10/20/25 L slabs, ₹120 cr purse (see docs/auction.md).
 - [ ] Which Kaggle auction dataset to use, and its license.
 - [ ] App name (Gully11 is a placeholder).
 - [ ] Free hosting limits for WebSockets on the chosen platform.

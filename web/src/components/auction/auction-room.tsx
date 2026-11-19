@@ -60,6 +60,22 @@ function BackLink() {
 
 function Lobby({ s, send, error, onJoin }: { s: RoomState; send: (m: object) => void; error: string | null; onJoin: (token: string) => void }) {
   const open = s.franchises.filter((f) => !f.bot && !f.owner).length;
+  const [name, setName] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const seated = !!s.you;
+  const canJoin = !seated && open > 0;
+
+  async function join(franchise?: string) {
+    setJoinError(null);
+    try {
+      const seat = await auctionApi.join(s.code, name.trim() || "Player", franchise);
+      saveSeat(seat);
+      onJoin(seat.token);
+    } catch (err) {
+      setJoinError(err instanceof Error ? err.message : "Couldn't join.");
+    }
+  }
+
   return (
     <div className="space-y-10">
       <div>
@@ -72,65 +88,64 @@ function Lobby({ s, send, error, onJoin }: { s: RoomState; send: (m: object) => 
 
       <div className="grid gap-10 lg:grid-cols-[1.2fr_1fr]">
         <section className="space-y-3">
-          <div className="label">Franchises</div>
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="label">Franchises</div>
+            {(seated || canJoin) && <span className="font-mono text-[11px] text-muted-foreground">Pick the team you want to run</span>}
+          </div>
           <ul className="divide-y border-y">
-            {s.franchises.map((f) => (
-              <li key={f.id} className="flex items-center gap-3 py-2.5">
-                <TeamTag id={f.id} />
-                <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                <span className={cn("flex items-center gap-1.5 font-mono text-xs", f.id === s.you ? "text-signal" : "text-muted-foreground")}>
-                  {f.bot ? <><RobotIcon />bot · {f.personality}</> : f.owner ? <><UserIcon />{f.owner}{f.id === s.you ? " (you)" : ""}</> : "waiting for a friend"}
-                </span>
-              </li>
-            ))}
+            {s.franchises.map((f) => {
+              const mine = f.id === s.you;
+              const free = !f.owner;            // a bot or an empty friend's seat
+              return (
+                <li key={f.id} className={cn("flex items-center gap-3 py-2.5", mine && "bg-signal/10")}>
+                  <TeamTag id={f.id} />
+                  <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                  <span className={cn("flex items-center gap-1.5 font-mono text-xs", mine ? "text-signal" : "text-muted-foreground")}>
+                    {f.owner ? <><UserIcon />{f.owner}{mine ? " (you)" : ""}</> : f.bot ? <><RobotIcon />bot</> : "open seat"}
+                  </span>
+                  {free && (seated || canJoin) && (
+                    <Button size="sm" variant="outline" className="h-7 font-mono text-[11px] uppercase"
+                      onClick={() => (seated ? send({ type: "choose", franchise: f.id }) : join(f.id))}>
+                      Take
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
 
         <section className="space-y-5">
-          {!s.you && <JoinHere code={s.code} onJoin={onJoin} />}
+          {canJoin && (
+            <form onSubmit={(e) => { e.preventDefault(); join(); }} className="space-y-2 border-l-2 border-signal pl-4">
+              <div className="label">Join this auction</div>
+              <div className="flex gap-2">
+                <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} placeholder="Your name" className="h-10" />
+                <Button type="submit" className="h-10">Join</Button>
+              </div>
+              <p className="font-mono text-[11px] text-muted-foreground">Then press Take on the franchise you want, or join and get the next free one.</p>
+              {joinError && <p className="text-sm text-destructive">{joinError}</p>}
+            </form>
+          )}
+          {!seated && !canJoin && <p className="text-sm text-muted-foreground">Every seat is taken: you&apos;re watching this room.</p>}
           {open > 0 && (
             <div className="space-y-2">
               <div className="label">Invite {open === 1 ? "a friend" : `${open} friends`}</div>
               <ShareBox path={`/auction/${s.code}`} />
-              <p className="font-mono text-[11px] text-muted-foreground">They open the link (or enter code {s.code}) and take a free franchise. Seats nobody takes become bots when the auction starts.</p>
+              <p className="font-mono text-[11px] text-muted-foreground">They open the link (or enter code {s.code}) and pick a franchise. Open seats nobody takes become bots when the auction starts.</p>
             </div>
           )}
           {s.host ? (
             <Button size="lg" onClick={() => send({ type: "start" })} className="h-12 w-full font-mono uppercase sm:w-auto">
               <GavelIcon weight="fill" />Start the auction
             </Button>
-          ) : (
+          ) : seated ? (
             <p className="text-sm text-muted-foreground">Waiting for the host to start.</p>
-          )}
+          ) : null}
           {error && <p className="text-sm text-destructive">{error}</p>}
         </section>
       </div>
     </div>
-  );
-}
-
-function JoinHere({ code, onJoin }: { code: string; onJoin: (token: string) => void }) {
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  async function join(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      const seat = await auctionApi.join(code, name.trim() || "Player");
-      saveSeat(seat);
-      onJoin(seat.token);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't join.");
-    }
-  }
-  return (
-    <form onSubmit={join} className="space-y-2 border-l-2 border-signal pl-4">
-      <div className="label">Take a franchise</div>
-      <div className="flex gap-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} placeholder="Your name" className="h-10" />
-        <Button type="submit" className="h-10">Join</Button>
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-    </form>
   );
 }
 

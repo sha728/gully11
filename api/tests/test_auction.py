@@ -195,3 +195,28 @@ def test_summary_counts_each_unsold_player_once():
         t += 100
         r.tick(t)
     assert r.summary()["unsold"] == 20 and r.summary()["sold"] == 0
+
+
+def test_humans_choose_from_the_rooms_franchises():
+    r = room(teams=4, humans=2)
+    you = me(r)
+    bot_team = next(f.id for f in r.franchises.values() if f.bot)
+    old = you.id
+    r.choose(you, bot_team)                            # swap with a bot
+    assert you.id == bot_team and not r.franchises[bot_team].bot
+    assert r.franchises[old].bot and len(r.franchises) == 4
+    with pytest.raises(AuctionError, match="isn't in this room"):
+        r.choose(you, next(fid for fid, _ in __import__("gully_api.auction.room", fromlist=["FRANCHISES"]).FRANCHISES
+                           if fid not in r.franchises))
+    friend = r.claim("Asha", old)                       # join straight into a chosen team
+    assert friend.id == old
+    with pytest.raises(AuctionError, match="already taken by Asha"):
+        r.choose(you, old)
+    r.start(0, r.host_token)
+    with pytest.raises(AuctionError, match="fixed"):
+        r.choose(you, friend.id)
+
+
+def test_view_does_not_reveal_bot_personalities():
+    r = room(teams=4, humans=1)
+    assert "personality" not in str(r.view()) and "aggressive" not in str(r.view())

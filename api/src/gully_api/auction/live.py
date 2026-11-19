@@ -141,6 +141,12 @@ class Rooms:
                 await live.act(lambda: live.room.bid(franchise.id, int(msg["amount"]), time.time()))
             elif kind == "pass":
                 await live.act(lambda: live.room.pass_(franchise.id))
+            elif kind == "choose":
+                await live.act(lambda: live.room.choose(franchise, str(msg["franchise"])))
+                # Same seat, new team: re-point this socket and tell the browser.
+                live.sockets[ws] = franchise.id
+                live.refresh_online()
+                await ws.send_text(json.dumps({"type": "you", "you": franchise.id}))
             elif kind == "ping":
                 await ws.send_text(json.dumps({"type": "pong", "server_now": time.time()}))
         except (AuctionError, KeyError, ValueError, TypeError) as e:

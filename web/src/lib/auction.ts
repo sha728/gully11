@@ -30,7 +30,6 @@ export interface FranchiseView {
   name: string;
   bot: boolean;
   owner: string | null;
-  personality: string | null;
   purse: number;
   squad: { id: string; price: number }[];
   size: number;
@@ -113,8 +112,8 @@ export interface Seat { code: string; token: string; franchise: string }
 export const auctionApi = {
   create: (b: { nickname: string; teams: number; humans: number; speed: "normal" | "fast" }) =>
     call<Seat>("/rooms", { method: "POST", body: JSON.stringify(b) }),
-  join: (code: string, nickname: string) =>
-    call<Seat>(`/rooms/${encodeURIComponent(code)}/join`, { method: "POST", body: JSON.stringify({ nickname }) }),
+  join: (code: string, nickname: string, franchise?: string) =>
+    call<Seat>(`/rooms/${encodeURIComponent(code)}/join`, { method: "POST", body: JSON.stringify({ nickname, franchise }) }),
   get: (code: string) => call<RoomState & { live: boolean; result?: Summary }>(`/rooms/${encodeURIComponent(code)}`),
 };
 
@@ -155,6 +154,10 @@ export function useRoom(code: string, token: string | null, enabled: boolean) {
           offset.current = m.server_now - Date.now() / 1000;
           if ("you" in m) meta.current = { you: m.you ?? null, host: !!m.host };
           setState({ ...m, ...meta.current });
+        } else if (m.type === "you") {
+          // Picked another franchise in the lobby: same seat, new team id.
+          meta.current = { ...meta.current, you: m.you };
+          setState((prev) => (prev ? { ...prev, you: m.you } : prev));
         } else if (m.type === "error") {
           setError(m.message);
         }

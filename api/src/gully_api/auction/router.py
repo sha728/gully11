@@ -26,6 +26,7 @@ class NewRoom(BaseModel):
 
 class Join(BaseModel):
     nickname: str = Field(min_length=1, max_length=24)
+    franchise: str | None = None         # one of the room's franchises; else the next free seat
 
 
 @router.post("/rooms")
@@ -56,7 +57,7 @@ async def join_room(code: str, req: Join) -> dict[str, Any]:
         raise HTTPException(409, "This auction has already started.")
     async with live.lock:
         try:
-            f = live.room.claim(req.nickname)
+            f = live.room.claim(req.nickname, req.franchise)
         except AuctionError as e:
             raise HTTPException(409, str(e)) from e
     await live.broadcast()

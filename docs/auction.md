@@ -32,7 +32,7 @@ replaces `values()` once a licensed price history exists.
 
 ## Room flow (`room.py`, `live.py`)
 
-Lobby (host plus friends with the code; empty seats become bots) → marquee sets,
+Lobby (host plus friends with the code; anyone can take a franchise held by a bot or an open seat; empty seats become bots; bot personalities stay on the server) → marquee sets,
 then capped batters, all-rounders, keepers, fast bowlers, spinners in turn, then
 uncapped → accelerated round (unsold players again, shorter clock) → summary.
 

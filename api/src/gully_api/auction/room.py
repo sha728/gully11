@@ -119,15 +119,40 @@ class Room:
         self.host_token = first.token
 
     # ------------------------------------------------------------ people
-    def claim(self, nickname: str) -> Franchise:
-        """A human joins: they take the next free human franchise."""
+    def claim(self, nickname: str, want: str | None = None) -> Franchise:
+        """A human joins and takes a free seat; ``want`` picks which of the room's
+        franchises it is (see ``choose``)."""
         nickname = nickname.strip()[:24] or "Player"
-        for f in self.franchises.values():
-            if not f.bot and f.owner is None:
-                f.owner, f.token = nickname, secrets.token_urlsafe(16)
-                self._touch()
-                return f
-        raise AuctionError("Every franchise is taken. Ask the host to add more seats.")
+        if want:
+            self._check_choice(want)
+        f = next((f for f in self.franchises.values() if not f.bot and f.owner is None), None)
+        if f is None:
+            raise AuctionError("Every franchise is taken. Ask the host to add more seats.")
+        f.owner, f.token = nickname, secrets.token_urlsafe(16)
+        if want:
+            self.choose(f, want)
+        self._touch()
+        return f
+
+    def _check_choice(self, fid: str) -> Franchise:
+        if self.phase != "lobby":
+            raise AuctionError("Teams are fixed once the auction starts.")
+        other = self.franchises.get(fid)
+        if other is None:
+            raise AuctionError("That franchise isn't in this room.")
+        if other.owner:
+            raise AuctionError(f"{other.name} is already taken by {other.owner}.")
+        return other
+
+    def choose(self, f: Franchise, fid: str) -> None:
+        """Before the start, a human picks which of the room's franchises they are:
+        they swap with the bot (or empty friend's seat) that holds it."""
+        if fid == f.id:
+            return
+        other = self._check_choice(fid)
+        other.id, other.name, f.id, f.name = f.id, f.name, other.id, other.name
+        self.franchises = {x.id: x for x in self.franchises.values()}
+        self._touch()
 
     def by_token(self, token: str | None) -> Franchise | None:
         return next((f for f in self.franchises.values() if token and f.token == token), None)
@@ -358,7 +383,7 @@ class Room:
                       if self.accelerated else {"n": self.presented, "of": self.total_lots}),
             "rules": {k: self.rules[k] for k in ("purse_lakh", "squad_min", "squad_max", "overseas_max", "increments")},
             "franchises": [{
-                "id": f.id, "name": f.name, "bot": f.bot, "owner": f.owner, "personality": f.personality if f.bot else None,
+                "id": f.id, "name": f.name, "bot": f.bot, "owner": f.owner,
                 "purse": f.purse, "squad": f.squad, "size": len(f.squad),
                 "overseas": f.count(self.pool, overseas=True),
                 "roles": {r: f.count(self.pool, role=r) for r in SQUAD_PLAN},

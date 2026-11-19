@@ -93,15 +93,20 @@ def _shrink(counts: dict[str, list[float]], exp: dict[str, list[float]],
     return out
 
 
-def _expected(r: dict, base: list[float]) -> list[float]:
-    """Context-expected counts from a phase row; falls back to balls x baseline."""
-    if r.get("exp_dots") is not None:
-        return counts_to_vector({k: r[f"exp_{k}"] for k in
-                                 ("wickets", "dots", "ones", "twos", "threes", "fours", "sixes")})
+_CATS = ("wickets", "dots", "ones", "twos", "threes", "fours", "sixes")
+
+
+def _expected(r: dict, base: list[float], league_adjusted: bool = True) -> list[float]:
+    """Expected counts for a phase row. Preference: league-adjusted (lexp_*: league
+    average x competition strength, so ratings from different leagues share one
+    scale), then plain context baseline (exp_*), then balls x family baseline."""
+    for prefix in (("lexp_", "exp_") if league_adjusted else ("exp_",)):
+        if r.get(f"{prefix}dots") is not None:
+            return counts_to_vector({k: r[f"{prefix}{k}"] for k in _CATS})
     return [r["balls"] * b for b in base]
 
 
-def from_phase_rows(player: dict, rows: list[dict], env: Env) -> Profile:
+def from_phase_rows(player: dict, rows: list[dict], env: Env, league_adjusted: bool = True) -> Profile:
     """Build a profile from ``players`` row + its ``player_phase_stats`` rows for the
     format family matching ``env`` (T20 stats for T20 sims, ODI stats for ODIs)."""
     bat_c, bat_x, bat_n, bowl_c, bowl_x, bowl_n = {}, {}, {}, {}, {}, {}
@@ -112,10 +117,10 @@ def from_phase_rows(player: dict, rows: list[dict], env: Env) -> Profile:
             continue
         if r["role"] == "bat":
             bat_c[p], bat_n[p] = counts_to_vector(r), r["balls"]
-            bat_x[p] = _expected(r, env.bat_base[p])
+            bat_x[p] = _expected(r, env.bat_base[p], league_adjusted)
         else:
             bowl_c[p], bowl_n[p] = counts_to_vector(r), r["balls"]
-            bowl_x[p] = _expected(r, env.bowl_base[p])
+            bowl_x[p] = _expected(r, env.bowl_base[p], league_adjusted)
             wides += r.get("wide_balls") or 0
             noballs += r.get("noball_balls") or 0
             ew, en = r.get("exp_wide_balls"), r.get("exp_noball_balls")

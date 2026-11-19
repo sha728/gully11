@@ -113,7 +113,7 @@ def load_matches(con, y0: int, y1: int) -> list[dict]:
 
 
 def load_profiles(con, ids: set[str], env, fmt: str = "T20",
-                  as_of: int | None = None, half_life: int = 0) -> dict:
+                  as_of: int | None = None, half_life: int = 0, league_adjusted: bool = True) -> dict:
     """Career ratings (player_phase_stats, all data) or, with ``as_of``, point-in-time
     form ratings from player_phase_form: only data before ``as_of``, recency-weighted."""
     players = {r["id"]: r for r in q(con, "SELECT id, name, role FROM players WHERE id IN (SELECT unnest(?))",
@@ -128,7 +128,8 @@ def load_profiles(con, ids: set[str], env, fmt: str = "T20",
         params = [fmt, list(ids), as_of, half_life]
     for r in q(con, sql, params):
         rows[r["pid"]].append(r)
-    return {pid: from_phase_rows(players[pid], rows[pid], env) for pid in ids if pid in players}
+    return {pid: from_phase_rows(players[pid], rows[pid], env, league_adjusted)
+            for pid in ids if pid in players}
 
 
 def season_year(mt: dict) -> int:
@@ -281,6 +282,8 @@ def main(argv=None) -> int:
     ap.add_argument("--ratings", choices=["form", "career"], default="form",
                     help="form: point-in-time, recency-weighted (no look-ahead); career: all data")
     ap.add_argument("--half-life", type=int, default=4, help="years; 0 = no decay (form ratings)")
+    ap.add_argument("--no-league-adjust", action="store_true",
+                    help="rate players vs their own league's average, without competition strength")
     args = ap.parse_args(argv)
 
     t0 = time.perf_counter()
@@ -297,10 +300,11 @@ def main(argv=None) -> int:
         ids = {p for m in test + fit_set for t in m["teams"].values() for p in t["xi"] + t["impact"]}
         years = {season_year(m) for m in test + fit_set}
         if args.ratings == "career":
-            career = load_profiles(con, ids, env)
+            career = load_profiles(con, ids, env, league_adjusted=not args.no_league_adjust)
             profs = {y: career for y in years}
         else:
-            profs = {y: load_profiles(con, ids, env, as_of=y, half_life=args.half_life) for y in years}
+            profs = {y: load_profiles(con, ids, env, as_of=y, half_life=args.half_life,
+                                      league_adjusted=not args.no_league_adjust) for y in years}
 
     if args.fit:
         print(f"Fitting calibration on {len(fit_set)} matches ({args.fit[0]}-{args.fit[1]})")
@@ -318,7 +322,9 @@ def main(argv=None) -> int:
     print(f"\nValidation on {len(test)} real matches {args.years[0]}-{args.years[1]}, "
           f"{len(test) * args.runs:,} simulated, env={args.env}, "
           f"{'calibrated' if calibrated else 'uncalibrated'}, ratings={args.ratings}"
-          f"{f' (half-life {args.half_life}y)' if args.ratings == 'form' else ''}, {time.perf_counter() - t0:.0f}s")
+          f"{f' (half-life {args.half_life}y)' if args.ratings == 'form' else ''}"
+          f"{', no league adjustment' if args.no_league_adjust else ', league-adjusted'}, "
+          f"{time.perf_counter() - t0:.0f}s")
     return 0 if report(real, sim, args.tolerance) else 1
 
 

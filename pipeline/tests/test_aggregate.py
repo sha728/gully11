@@ -103,6 +103,44 @@ def test_form_weights_by_recency(tmp_path):
         assert e2 / b2 == pytest.approx(e0 / b0)
 
 
+def test_league_strength_links_leagues_through_shared_players():
+    """A star who is average in the IPL but doubles the six rate in a weaker league
+    is the only link: that league's six-hitting must come out ~2x easier, and
+    the league-only batter there must rate below IPL average."""
+    from gully_pipeline.aggregate import league_strength
+
+    con = duckdb.connect()
+    cols = "pid VARCHAR, format VARCHAR, ctx VARCHAR, yr INT, phase VARCHAR, balls DOUBLE, " \
+           "wickets DOUBLE, dots DOUBLE, ones DOUBLE, twos DOUBLE, threes DOUBLE, fours DOUBLE, " \
+           "sixes DOUBLE"
+    con.execute(f"CREATE TEMP TABLE pc_bat ({cols})")
+    con.execute(f"CREATE TEMP TABLE pc_bowl ({cols}, wide_balls DOUBLE, noball_balls DOUBLE)")
+    ctx_cols = cols.replace("pid VARCHAR, ", "")
+    con.execute(f"CREATE TEMP TABLE ctx_bat ({ctx_cols})")
+    con.execute(f"CREATE TEMP TABLE ctx_bowl ({ctx_cols}, wide_balls DOUBLE, noball_balls DOUBLE)")
+
+    def bat(pid, ctx, balls, sixes):
+        w, ones, fours = 0.05 * balls, 0.3 * balls, 0.1 * balls
+        dots = balls - ones - fours - sixes          # dots include wicket balls
+        con.execute("INSERT INTO pc_bat VALUES (?, 'T20', ?, 2024, 'PP', ?, ?, ?, ?, 0, 0, ?, ?)",
+                    [pid, ctx, balls, w, dots, ones, fours, sixes])
+
+    bat("star", "Indian Premier League", 10000, 1000)   # 10%: exactly IPL average
+    bat("ipl_only", "Indian Premier League", 90000, 9000)
+    bat("star", "Weak League", 10000, 2000)             # 20% in the weak league
+    bat("weak_only", "Weak League", 90000, 8000)        # league average stays 10%
+    con.execute("""INSERT INTO ctx_bat SELECT format, ctx, yr, phase, sum(balls), sum(wickets),
+                   sum(dots), sum(ones), sum(twos), sum(threes), sum(fours), sum(sixes)
+                   FROM pc_bat GROUP BY ALL""")
+    league_strength(con)
+    s = dict(con.execute("SELECT ctx, strength FROM league_strength "
+                         "WHERE role = 'bat' AND cat = 'sixes'").fetchall())
+    assert s["Indian Premier League"] == pytest.approx(1.0)
+    assert 1.5 < s["Weak League"] < 2.1
+    r = dict(con.execute("SELECT pid, r FROM ls_r WHERE role = 'bat' AND cat = 'sixes'").fetchall())
+    assert r["weak_only"] < 0.75 < r["ipl_only"]
+
+
 def test_season_stats(db):
     s = row(db, "select * from player_season_stats where player_id='id_a' and format='IPL'")
     assert s["season"] == "2024" and s["runs"] == 4

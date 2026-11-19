@@ -33,6 +33,20 @@ overs in a row, and keeps the two best death bowlers' last overs for the death.
   `sim/data/base_rates.json`.
 - **Legends** (no ball-by-ball data) are estimated from career average and
   strike rate by tilting the league distribution, and are marked `estimated`.
+- **League strength.** A rating against a league's own average isn't
+  comparable across leagues, because beating the BPL average is easier than
+  beating the IPL's. The pipeline models each player's outcomes in
+  competition c as rating × strength[c] × league-average expectation, per
+  role and outcome. It fits both by alternating updates: players who appear in
+  several competitions link them, and priors are 300 balls per player and
+  2,000 per competition. Strength is anchored at 1 for the IPL (T20) and for
+  full-member internationals (ODI). Internationals are split into full,
+  mixed and associate contexts. The `lexp_*` columns hold these adjusted
+  expectations, which the simulator uses by default. The factors are in the
+  DuckDB table `league_strength`. For example, an average Blast batter rates
+  about 20% below an average IPL batter for six-hitting and gets out more.
+  Strength is per competition, not per year, and is fitted on all data, which
+  leaks slightly into the point-in-time validation.
 - **Recent form.** `player_phase_form` holds recency-weighted counts. Each
   year before `as_of` is weighted 0.5^((as_of − 1 − year) / half_life). The
   pipeline builds a grid of as_of years (2024 to the current year) and half-lives
@@ -72,17 +86,22 @@ match. Results on 72 matches neither the ratings nor the calibration had seen:
 | Form as of season, no decay | 0.279 | 49.0% |
 | Form, half-life 1 / 2 / 4 years | 0.280 / 0.286 / 0.287 | 49.3% / 48.5% / 48.3% |
 | Form, IPL-only data, half-life 0 / 4 | 0.270 / 0.263 | 55.8% / 55.5% |
+| **Form 4y, league-adjusted (default)** | **0.268** | **52.0%** (54.5% in a second run) |
+| Form 4y, same calibration, no league adjustment | 0.277 | 46.8% (49.8%) |
 
 What this shows:
 
 - **Recency weighting doesn't measurably help.** All half-lives are within
   noise of each other. The 4-year default is a judgment call for face
   validity, since old form shouldn't count fully, not a measured gain.
-- **Ratings mixed across leagues carry no predictive signal.** Same-league
-  (IPL-only) ratings pick about 56%, roughly what betting markets manage on
-  the IPL. A rating earned against a weaker league's average is inflated, so
-  players from different leagues aren't comparable. This is the main open
-  problem (see below).
+- **Ratings mixed across leagues carried no predictive signal** until the
+  league-strength adjustment. Same-league (IPL-only) ratings pick about 56%.
+  The adjustment recovers most of that (52–55%) and improves Brier while
+  keeping every player rated, including those with little or no IPL data.
+- **Rating damping (not enabled).** Raising player ratios to a power below 1
+  pulls Brier toward 0.25 (α = 0.4: 0.257), but the pick rate moves within
+  noise. Tuning it on these 213 matches would be in-sample, and the game needs
+  strong squads to look strong, so it stays off.
 - **The simulator is overconfident.** Player ratings spread the per-match win
   chance with an sd of 0.144, while role structure alone gives 0.022. Brier
   stays above 0.25 because that spread isn't backed by enough signal.
@@ -99,10 +118,11 @@ stronger with bat and ball.
 
 ## Known gaps / next steps
 
-- **League-strength adjustment (next).** Estimate a strength factor per
-  competition from players who appear in several, so that a rating earned in
-  any league is on one scale. Expected to recover the same-league signal for
-  every player, and to reduce overconfidence.
+- **Still overconfident.** Brier is about 0.27 against a coin flip's 0.25:
+  the per-match win chances spread wider than the real signal supports.
+  Opponent adjustment within a competition (a full member playing an
+  associate) and better links for associate players, who rarely play
+  elsewhere, are the next levers. Rating damping is the quick fix if needed.
 - Calibration is per environment. Only `IPL_recent` is fitted; other
   environments run uncalibrated until fitted on their own matches.
 - Free hits, super overs (ties stand as ties), DLS and Test matches are not

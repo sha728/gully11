@@ -100,6 +100,15 @@ CREATE TABLE player_phase_stats (
     exp_sixes        double precision,
     exp_wide_balls   double precision,
     exp_noball_balls double precision,
+    -- League-adjusted expectations: exp_* x competition strength (league_strength),
+    -- so ratings from different leagues share one scale (T20: IPL = 1).
+    lexp_wickets        double precision,
+    lexp_dots           double precision,
+    lexp_ones           double precision,
+    lexp_twos           double precision,
+    lexp_threes         double precision,
+    lexp_fours          double precision,
+    lexp_sixes          double precision,
     PRIMARY KEY (player_id, format, phase, role)
 );
 
@@ -132,6 +141,15 @@ CREATE TABLE player_phase_form (
     exp_sixes        double precision,
     exp_wide_balls   double precision,
     exp_noball_balls double precision,
+    -- League-adjusted expectations: exp_* x competition strength (league_strength),
+    -- so ratings from different leagues share one scale (T20: IPL = 1).
+    lexp_wickets        double precision,
+    lexp_dots           double precision,
+    lexp_ones           double precision,
+    lexp_twos           double precision,
+    lexp_threes         double precision,
+    lexp_fours          double precision,
+    lexp_sixes          double precision,
     PRIMARY KEY (player_id, format, phase, role)
 );
 

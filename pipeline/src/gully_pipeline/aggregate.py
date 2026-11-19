@@ -170,14 +170,23 @@ ORDER BY player_id, {k};
 """
 
 
+FULL_MEMBERS = ("('India', 'Australia', 'England', 'South Africa', 'New Zealand', 'Pakistan', "
+                "'Sri Lanka', 'West Indies', 'Bangladesh', 'Zimbabwe', 'Afghanistan', 'Ireland')")
+
 CONTEXT_SQL = f"""
 -- Context baselines: league-average rates per (format, competition, year, phase).
 -- A player's expected counts = their balls in each context x that context's rate,
 -- so ratings compare a player with the cricket they actually played in
 -- (an IPL batter against IPL scoring, not against all T20 everywhere).
+-- Internationals are split by tier: India v Australia and Nepal v Oman are not the
+-- same competition. ICC Full Members (all 12 treated as full for every year).
 CREATE OR REPLACE TEMP VIEW fdc AS
-SELECT *, CASE WHEN team_type = 'international' THEN 'intl'
-               ELSE coalesce(event_name, 'other') END AS ctx,
+SELECT *,
+       CASE WHEN team_type = 'international' THEN
+                CASE WHEN batting_team IN {FULL_MEMBERS} AND bowling_team IN {FULL_MEMBERS} THEN 'intl-full'
+                     WHEN batting_team IN {FULL_MEMBERS} OR bowling_team IN {FULL_MEMBERS} THEN 'intl-mixed'
+                     ELSE 'intl-assoc' END
+            ELSE coalesce(event_name, 'other') END AS ctx,
        year(start_date) AS yr
 FROM fd WHERE phase IS NOT NULL;
 
@@ -206,33 +215,6 @@ SELECT format, ctx, yr, phase,
        count(*) FILTER (WHERE wides > 0) AS wide_balls,
        count(*) FILTER (WHERE noballs > 0) AS noball_balls
 FROM fdc GROUP BY ALL;
-
-CREATE OR REPLACE TEMP TABLE phase_exp AS
-WITH pb AS (
-    SELECT batter_id AS pid, format, ctx, yr, phase,
-           count(*) FILTER (WHERE wides = 0) AS n
-    FROM fdc WHERE batter_id IS NOT NULL GROUP BY ALL
-),
-pw AS (
-    SELECT bowler_id AS pid, format, ctx, yr, phase,
-           count(*) FILTER (WHERE is_legal) AS n
-    FROM fdc WHERE bowler_id IS NOT NULL GROUP BY ALL
-)
-SELECT 'bat' AS role, pid, format, phase,
-       sum(n * c.wickets / c.balls) AS exp_wickets, sum(n * c.dots / c.balls) AS exp_dots,
-       sum(n * c.ones / c.balls) AS exp_ones, sum(n * c.twos / c.balls) AS exp_twos,
-       sum(n * c.threes / c.balls) AS exp_threes, sum(n * c.fours / c.balls) AS exp_fours,
-       sum(n * c.sixes / c.balls) AS exp_sixes,
-       NULL::DOUBLE AS exp_wide_balls, NULL::DOUBLE AS exp_noball_balls
-FROM pb JOIN ctx_bat c USING (format, ctx, yr, phase) WHERE c.balls > 0 GROUP BY ALL
-UNION ALL
-SELECT 'bowl', pid, format, phase,
-       sum(n * c.wickets / c.balls), sum(n * c.dots / c.balls),
-       sum(n * c.ones / c.balls), sum(n * c.twos / c.balls),
-       sum(n * c.threes / c.balls), sum(n * c.fours / c.balls),
-       sum(n * c.sixes / c.balls),
-       sum(n * c.wide_balls / c.balls), sum(n * c.noball_balls / c.balls)
-FROM pw JOIN ctx_bowl c USING (format, ctx, yr, phase) WHERE c.balls > 0 GROUP BY ALL;
 """
 
 # --------------------------------------------------------------- recent form
@@ -282,6 +264,120 @@ FROM fdc WHERE bowler_id IS NOT NULL GROUP BY ALL;
 
 _FORM_CATS = ["wickets", "dots", "ones", "twos", "threes", "fours", "sixes"]
 
+# --------------------------------------------------------- league strength
+# Context baselines make a rating "vs the average of the league you played in",
+# which is not comparable across leagues: beating the BPL or associate average is
+# easier than beating the IPL's. Model each player's outcomes in competition c as
+#     observed ≈ rating[player] × strength[c] × context_expected
+# per role and outcome, and fit both by alternating updates. Players who appear in
+# several competitions link them. Strength is anchored at 1 for the reference
+# competition, so league-adjusted ratings read as "vs the IPL average" (T20) or
+# "vs full-member internationals" (ODI). Strength is per competition, not per
+# year (more stable; ageing would otherwise leak into year factors).
+LEAGUE_REF = {"T20": "Indian Premier League", "ODI": "intl-full"}
+LEAGUE_ITERATIONS = 60
+K_LEAGUE_PLAYER = 300    # balls of prior pulling a player's rating toward 1 in the fit
+K_LEAGUE_CTX = 2000      # balls of prior pulling a competition's factor toward 1
+
+
+def _fam(col: str) -> str:
+    return f"CASE WHEN {col} = 'ODI' THEN 'ODI' ELSE 'T20' END"
+
+
+def league_strength(con) -> dict:
+    """Fit competition strength factors; leaves temp table ``ls_wide`` for joins and
+    writes ``league_strength`` (one row per role, family, competition, outcome)."""
+    cats = "[" + ", ".join(f"'{c}'" for c in _FORM_CATS) + "]"
+    parts = []
+    for role, pc, ctx in (("bat", "pc_bat", "ctx_bat"), ("bowl", "pc_bowl", "ctx_bowl")):
+        obs = "[" + ", ".join(f"p.{c}::DOUBLE" for c in _FORM_CATS) + "]"
+        exp = "[" + ", ".join(f"p.balls * c.{c} / c.balls" for c in _FORM_CATS) + "]"
+        parts.append(f"""
+            SELECT '{role}' AS role, {_fam('p.format')} AS fam, p.pid, p.ctx,
+                   unnest({cats}) AS cat, unnest({obs}) AS o, unnest({exp}) AS x, p.balls
+            FROM {pc} p JOIN {ctx} c USING (format, ctx, yr, phase)
+            WHERE p.format IN ('T20', 'ODI') AND c.balls > 0""")
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE ls_obs AS
+        SELECT role, fam, pid, ctx, cat, sum(o) AS o, sum(x) AS x, sum(balls) AS balls
+        FROM ({' UNION ALL '.join(parts)}) GROUP BY ALL;
+        CREATE OR REPLACE TEMP TABLE ls_rate AS
+        SELECT role, fam, cat, sum(x) / sum(balls) AS rate FROM ls_obs GROUP BY ALL;
+        CREATE OR REPLACE TEMP TABLE ls_s AS
+        SELECT DISTINCT role, fam, ctx, cat, 1.0::DOUBLE AS s FROM ls_obs;
+    """)
+    # Ratings must start from the data (observed / expected with every league at 1):
+    # starting them all at 1 makes the first strength update return 1 everywhere,
+    # which looks converged on step one.
+    r_update = f"""
+        CREATE OR REPLACE TEMP TABLE ls_r AS
+        SELECT o.role, o.fam, o.pid, o.cat,
+               coalesce((sum(o.o) + {K_LEAGUE_PLAYER} * q.rate)
+                        / nullif(sum(s.s * o.x) + {K_LEAGUE_PLAYER} * q.rate, 0), 1) AS r
+        FROM ls_obs o JOIN ls_s s USING (role, fam, ctx, cat) JOIN ls_rate q USING (role, fam, cat)
+        GROUP BY o.role, o.fam, o.pid, o.cat, q.rate;
+    """
+    con.execute(r_update)
+    ref = f"CASE s.fam WHEN 'ODI' THEN '{LEAGUE_REF['ODI']}' ELSE '{LEAGUE_REF['T20']}' END"
+    change = float("inf")
+    it = 0
+    for it in range(1, LEAGUE_ITERATIONS + 1):
+        con.execute(f"""
+            CREATE OR REPLACE TEMP TABLE ls_s_raw AS
+            SELECT o.role, o.fam, o.ctx, o.cat,
+                   coalesce((sum(o.o) + {K_LEAGUE_CTX} * q.rate)
+                            / nullif(sum(r.r * o.x) + {K_LEAGUE_CTX} * q.rate, 0), 1) AS s,
+                   sum(o.balls) AS balls, count(DISTINCT o.pid) AS players
+            FROM ls_obs o JOIN ls_r r USING (role, fam, pid, cat) JOIN ls_rate q USING (role, fam, cat)
+            GROUP BY o.role, o.fam, o.ctx, o.cat, q.rate;
+            CREATE OR REPLACE TEMP TABLE ls_s_new AS
+            SELECT s.role, s.fam, s.ctx, s.cat, s.s / coalesce(rf.s, 1) AS s, s.balls, s.players
+            FROM ls_s_raw s LEFT JOIN ls_s_raw rf
+              ON rf.role = s.role AND rf.fam = s.fam AND rf.cat = s.cat AND rf.ctx = {ref};
+        """)
+        change = con.execute("""
+            SELECT coalesce(max(abs(ln(n.s / o.s))), 0) FROM ls_s_new n
+            JOIN ls_s o USING (role, fam, ctx, cat)
+            -- judge convergence on the big competitions (or the biggest, in small data)
+            WHERE n.balls >= least(20000, (SELECT max(balls) FROM ls_s_new))
+        """).fetchone()[0]
+        con.execute("CREATE OR REPLACE TEMP TABLE ls_s AS SELECT * FROM ls_s_new")
+        con.execute(r_update)
+        if it >= 3 and change < 1e-4:
+            break
+    pivot = ", ".join(f"max(s) FILTER (WHERE cat = '{c}') AS s_{c}" for c in _FORM_CATS)
+    con.execute(f"""
+        CREATE OR REPLACE TABLE league_strength AS
+        SELECT role, fam, ctx, cat, round(s, 4) AS strength, balls, players FROM ls_s
+        ORDER BY role, fam, cat, balls DESC;
+        CREATE OR REPLACE TEMP TABLE ls_wide AS
+        SELECT role, fam, ctx, {pivot} FROM ls_s GROUP BY ALL;
+    """)
+    return {"iterations": it, "last_change": change}
+
+
+def phase_exp_sql() -> str:
+    """Per player/format/phase expected counts: plain context baseline (exp_*) and
+    league-adjusted (lexp_* = exp_* x competition strength)."""
+
+    def side(role: str, pc: str, ctx: str, extra: list[str]) -> str:
+        exp = ", ".join(f"sum(p.balls * c.{c} / c.balls) AS exp_{c}" for c in _FORM_CATS + extra)
+        lexp = ", ".join(f"sum(p.balls * c.{c} / c.balls * coalesce(l.s_{c}, 1)) AS lexp_{c}"
+                         for c in _FORM_CATS)
+        null_exp = "" if extra else ", NULL::DOUBLE AS exp_wide_balls, NULL::DOUBLE AS exp_noball_balls"
+        return f"""
+        SELECT '{role}' AS role, p.pid, p.format, p.phase, {exp}{null_exp}, {lexp}
+        FROM {pc} p JOIN {ctx} c USING (format, ctx, yr, phase)
+        LEFT JOIN ls_wide l ON l.role = '{role}' AND l.fam = {_fam('p.format')} AND l.ctx = p.ctx
+        WHERE c.balls > 0 GROUP BY ALL"""
+
+    return f"""
+CREATE OR REPLACE TEMP TABLE phase_exp AS
+{side('bat', 'pc_bat', 'ctx_bat', [])}
+UNION ALL BY NAME
+{side('bowl', 'pc_bowl', 'ctx_bowl', ['wide_balls', 'noball_balls'])};
+"""
+
 
 def form_sql(grid: list[tuple[int, int]]) -> str:
     values = ", ".join(f"({a}, {h})" for a, h in grid)
@@ -291,18 +387,21 @@ def form_sql(grid: list[tuple[int, int]]) -> str:
     def side(role: str, table: str, ctx: str, extra: list[str]) -> str:
         obs = ", ".join(f"sum(w * {c}) AS {c}" for c in _FORM_CATS + extra)
         exp = ", ".join(f"sum(w * balls * c_{c} / c_balls) AS exp_{c}" for c in _FORM_CATS + extra)
+        lexp = ", ".join(f"sum(w * balls * c_{c} / c_balls * s_{c}) AS lexp_{c}" for c in _FORM_CATS)
         null_extra = "" if extra else ", NULL::DOUBLE AS wide_balls, NULL::DOUBLE AS noball_balls"
         null_exp = "" if extra else ", NULL::DOUBLE AS exp_wide_balls, NULL::DOUBLE AS exp_noball_balls"
         cols = ", ".join(f"p.{c}" for c in _FORM_CATS + extra)
         ccols = ", ".join(f"c.{c} AS c_{c}" for c in _FORM_CATS + extra)
+        scols = ", ".join(f"coalesce(l.s_{c}, 1) AS s_{c}" for c in _FORM_CATS)
         return f"""
         SELECT as_of, half_life, '{role}' AS role, pid, format, phase,
-               sum(w * balls) AS balls, {obs}{null_extra}, {exp}{null_exp}
+               sum(w * balls) AS balls, {obs}{null_extra}, {exp}{null_exp}, {lexp}
         FROM (
             SELECT g.as_of, g.half_life, p.pid, p.format, p.phase, p.balls, {cols},
-                   c.balls AS c_balls, {ccols}, {weight} AS w
+                   c.balls AS c_balls, {ccols}, {scols}, {weight} AS w
             FROM {table} p
             JOIN {ctx} c USING (format, ctx, yr, phase)
+            LEFT JOIN ls_wide l ON l.role = '{role}' AND l.fam = {_fam('p.format')} AND l.ctx = p.ctx
             CROSS JOIN grid g
             WHERE p.yr < g.as_of AND c.balls > 0
         ) GROUP BY ALL"""
@@ -320,7 +419,7 @@ ORDER BY as_of, half_life, pid, format, phase, role;
 
 
 EXP_COLS = ["exp_wickets", "exp_dots", "exp_ones", "exp_twos", "exp_threes", "exp_fours",
-            "exp_sixes", "exp_wide_balls", "exp_noball_balls"]
+            "exp_sixes", "exp_wide_balls", "exp_noball_balls"] + [f"lexp_{c}" for c in _FORM_CATS]
 
 PHASE_SQL = f"""
 -- Outcome counts per ball by phase. Raw counts are kept alongside rates so the
@@ -501,12 +600,15 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         con.execute(stats_sql("player_format_stats", ["format"]))
         con.execute(stats_sql("player_season_stats", ["format", "season"]))
         con.execute(CONTEXT_SQL)
-        con.execute(PHASE_SQL)
         con.execute(FORM_BASE_SQL)
+        fit = league_strength(con)
+        print(f"league strength fit: {fit['iterations']} iterations, last change {fit['last_change']:.2e}")
+        con.execute(phase_exp_sql())
+        con.execute(PHASE_SQL)
         last_year = con.execute("SELECT max(yr) FROM fdc").fetchone()[0]
         as_ofs = sorted({min(FORM_FIRST_AS_OF, last_year + 1), *range(FORM_FIRST_AS_OF, last_year + 2)})
         con.execute(form_sql([(a, h) for a in as_ofs for h in FORM_HALF_LIVES]))
         con.execute(PLAYERS_SQL)
         tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats",
-                  "player_phase_form"]
+                  "player_phase_form", "league_strength"]
         return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}

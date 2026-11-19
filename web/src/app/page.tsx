@@ -1,103 +1,74 @@
-import Image from "next/image";
+import Link from "next/link";
+import SearchBox from "@/components/SearchBox";
+import { api, displayName, fmt, type SearchResult, type VenueSummary } from "@/lib/api";
 
-export default function Home() {
+export default async function Home() {
+  const [ipl, tests, venues] = await Promise.all([
+    api<SearchResult>("/players", { format: "IPL", limit: 6 }),
+    api<SearchResult>("/players", { format: "Test", limit: 6 }),
+    api<VenueSummary[]>("/venues", { limit: 6 }),
+  ]);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <div className="space-y-12">
+      <section className="py-6">
+        <h1 className="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
+          Every modern player, every format, ball by ball.
+        </h1>
+        <p className="mt-3 max-w-xl text-muted">
+          Career and season stats, powerplay-to-death splits, head-to-head comparisons and
+          venue records for Tests, ODIs, T20Is and the IPL.
+        </p>
+        <div className="mt-6 max-w-xl">
+          <SearchBox size="lg" autoFocus placeholder="Try “Kohli”, “Rashid” or “Wankhede”" />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </section>
+
+      <div className="grid gap-8 md:grid-cols-3">
+        <Shortlist title="Most-capped in the IPL" href="/players?format=IPL"
+          rows={ipl.items.map((p) => ({ href: `/players/${p.id}`, label: displayName(p),
+            value: `${fmt(p.runs)} runs · ${fmt(p.wickets)} wkts` }))} />
+        <Shortlist title="Most Tests (since 2001)" href="/players?format=Test"
+          rows={tests.items.map((p) => ({ href: `/players/${p.id}`, label: displayName(p),
+            value: `${fmt(p.format_matches)} Tests` }))} />
+        <Shortlist title="Busiest venues" href="/venues"
+          rows={venues.map((v) => ({ href: `/venues/${v.id}`, label: v.name,
+            value: `${fmt(v.matches)} matches` }))} />
+      </div>
+
+      <section className="rounded-xl border border-border bg-surface p-6">
+        <h2 className="font-semibold">Settle an argument</h2>
+        <p className="mt-1 text-sm text-muted">
+          Put any two players side by side in one format, with percentile ranks against everyone
+          who has faced or bowled 500+ balls.
+        </p>
+        <Link href="/compare" className="mt-4 inline-block rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-text">
+          Compare players
+        </Link>
+      </section>
     </div>
+  );
+}
+
+function Shortlist({ title, href, rows }: {
+  title: string; href: string; rows: { href: string; label: string; value: string }[];
+}) {
+  return (
+    <section>
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Link href={href} className="text-xs text-accent">See all</Link>
+      </div>
+      <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+        {rows.map((r) => (
+          <li key={r.href}>
+            <Link href={r.href} className="flex items-baseline justify-between gap-3 px-4 py-2.5 text-sm hover:bg-surface-2">
+              <span className="font-medium">{r.label}</span>
+              <span className="num text-xs text-muted">{r.value}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

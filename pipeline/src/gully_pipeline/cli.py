@@ -28,8 +28,14 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("legends", help="Rebuild reference/legends.csv from Wikipedia infoboxes")
     sub.add_parser("simbase", help="Write the simulator's base_rates.json from parsed data")
+    sub.add_parser("names", help="Fetch full names + Wikipedia titles from Wikidata")
 
     args = p.parse_args(argv)
+
+    if args.cmd == "names":
+        from .wikidata import NAMES_CSV, fetch_names
+        print(f"{fetch_names():,} players -> {NAMES_CSV}")
+        return
 
     if args.cmd == "simbase":
         from .simbase import OUT_PATH, build_simbase

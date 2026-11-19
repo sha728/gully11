@@ -15,7 +15,8 @@ Role = Literal["BAT", "BOWL", "AR", "WK"]
 
 class PlayerSummary(BaseModel):
     id: str
-    name: str
+    name: str                  # Cricsheet name (initials)
+    full_name: str | None      # from Wikidata, when known
     unique_name: str | None
     country: str | None
     role: Role
@@ -40,6 +41,8 @@ class SearchResult(BaseModel):
 class Player(BaseModel):
     id: str
     name: str
+    full_name: str | None
+    wikipedia_title: str | None
     unique_name: str | None
     cricinfo_id: str | None
     country: str | None
@@ -59,6 +62,8 @@ class PlayerProfile(BaseModel):
     formats: list[dict[str, Any]]
     seasons: list[dict[str, Any]]
     phases: list[dict[str, Any]]
+    dismissals: list[dict[str, Any]]
+    venues: list[dict[str, Any]]
 
 
 @router.get("", response_model=SearchResult)
@@ -80,10 +85,12 @@ def search_players(
 
     if q:
         # word_similarity lets "kohli" match "V Kohli"; ILIKE catches short exact substrings.
-        where.append("(%(q)s <%% p.name OR %(q)s <%% p.unique_name "
-                     "OR p.name ILIKE '%%' || %(q)s || '%%')")
+        where.append("(%(q)s <%% p.name OR %(q)s <%% p.unique_name OR %(q)s <%% p.full_name "
+                     "OR p.name ILIKE '%%' || %(q)s || '%%' OR p.full_name ILIKE '%%' || %(q)s || '%%')")
+        # Ties (e.g. two players called Rohit Sharma) fall back to matches played.
         score = ("greatest(word_similarity(%(q)s, p.name), "
-                 "word_similarity(%(q)s, coalesce(p.unique_name, ''))) DESC, ")
+                 "word_similarity(%(q)s, coalesce(p.unique_name, '')), "
+                 "word_similarity(%(q)s, coalesce(p.full_name, ''))) DESC, ")
     else:
         score = ""
     if country:
@@ -105,7 +112,7 @@ def search_players(
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     sql = f"""
-        SELECT p.id, p.name, p.unique_name, p.country, p.role, p.capped,
+        SELECT p.id, p.name, p.full_name, p.unique_name, p.country, p.role, p.capped,
                p.era_start, p.era_end, p.matches, {stat_cols},
                count(*) OVER () AS total
         FROM players p {join}
@@ -129,7 +136,7 @@ def get_player(
     ``format`` narrows the season and phase lists (career-by-format is always full).
     """
     player = conn.execute(
-        "SELECT id, name, unique_name, cricinfo_id, country, role, batting_hand, "
+        "SELECT id, name, full_name, wikipedia_title, unique_name, cricinfo_id, country, role, batting_hand, "
         "bowling_style, is_overseas_for_ipl, capped, era_start, era_end, matches, source "
         "FROM players WHERE id = %s",
         (player_id,),
@@ -151,8 +158,21 @@ def get_player(
         params,
     ).fetchall()
     phases = conn.execute(
-        f"SELECT * FROM player_phase_stats WHERE player_id = %(id)s {fmt_filter} "
+        f"SELECT {PHASE_COLS} FROM player_phase_stats WHERE player_id = %(id)s {fmt_filter} "
         "ORDER BY format, role, array_position(ARRAY['PP','middle','death'], phase)",
+        params,
+    ).fetchall()
+    dismissals = conn.execute(
+        f"SELECT format, kind, n FROM player_dismissals WHERE player_id = %(id)s {fmt_filter} "
+        "ORDER BY format, n DESC",
+        params,
+    ).fetchall()
+    # Venues with a meaningful sample: 3+ innings or 10+ overs bowled.
+    venues = conn.execute(
+        f"SELECT s.*, v.name AS venue_name, v.city FROM player_venue_stats s "
+        f"JOIN venues v ON v.id = s.venue_id WHERE s.player_id = %(id)s "
+        f"{'AND s.format = %(format)s' if format else ''} "
+        "AND (s.bat_innings >= 3 OR s.balls_bowled >= 60) ORDER BY s.format, s.runs DESC",
         params,
     ).fetchall()
 
@@ -162,4 +182,14 @@ def get_player(
         formats=strip(formats),
         seasons=strip(seasons),
         phases=strip(phases),
+        dismissals=dismissals,
+        venues=strip(venues),
     )
+
+
+# Phase columns shown to users (the exp_*/lexp_* columns are simulator inputs).
+PHASE_COLS = ", ".join([
+    "format", "phase", "role", "balls", "runs", "wickets", "dots", "ones", "twos", "threes",
+    "fours", "sixes", "wide_balls", "noball_balls", "dismissal_rate", "dot_pct", "single_pct",
+    "four_pct", "six_pct", "wide_rate", "noball_rate", "strike_rate", "economy",
+])

@@ -28,6 +28,7 @@ uv run gully-pipeline build --dataset all        # -> data/gully.duckdb player t
 uv run gully-pipeline load                       # -> Postgres (drops + reloads player tables)
 uv run gully-pipeline spotcheck                  # recount 10 players from raw JSON, diff vs tables
 uv run gully-pipeline legends                    # rebuild reference/legends.csv (needs WIKIMEDIA_CONTACT)
+uv run gully-pipeline names                      # full names from Wikidata -> reference/ (needs WIKIMEDIA_CONTACT)
 uv run gully-pipeline simbase                    # simulator base rates -> api/src/gully_api/sim/data/
 uv run pytest
 
@@ -40,9 +41,9 @@ uv run python scripts/validate_sim.py --fit 2024 2025 --years 2026 2026   # simu
 
 # Web
 cd ../web
-npm run dev                                      # http://localhost:3000
+npm run dev                                      # http://localhost:3000: search, player, compare, venue pages
 ```
 
 ## Data credits
 
-Match data from [Cricsheet](https://cricsheet.org/), licensed under the [Open Data Commons Attribution License](https://cricsheet.org/licensing/). Pre-2001 legends' career figures and player batting/bowling styles from Wikipedia (CC BY-SA 4.0); each row of `pipeline/reference/legends.csv` links the exact article revision it was read from.
+Match data from [Cricsheet](https://cricsheet.org/), licensed under the [Open Data Commons Attribution License](https://cricsheet.org/licensing/). Full player names from Wikidata (CC0). Pre-2001 legends' career figures and player batting/bowling styles from Wikipedia (CC BY-SA 4.0); each row of `pipeline/reference/legends.csv` links the exact article revision it was read from.

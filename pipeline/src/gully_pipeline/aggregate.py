@@ -556,6 +556,9 @@ SELECT s.pid AS id,
        p.name,
        p.unique_name,
        p.key_cricinfo AS cricinfo_id,
+       coalesce(nullif(wd.name_en, ''),
+                nullif(regexp_replace(wd.wikipedia_title, ' \\(.*\\)$', ''), '')) AS full_name,
+       nullif(wd.wikipedia_title, '') AS wikipedia_title,
        i.country,
        CASE
            WHEN coalesce(st.n, 0) >= 2 OR (st.n = 1 AND s.matches < 15) THEN 'WK'
@@ -575,10 +578,134 @@ SELECT s.pid AS id,
        'cricsheet' AS source
 FROM share s
 LEFT JOIN people p ON p.identifier = s.pid
+LEFT JOIN wd ON wd.cricinfo_id = p.key_cricinfo
 LEFT JOIN stumps st ON st.pid = s.pid
 LEFT JOIN intl i ON i.pid = s.pid
 LEFT JOIN capped c ON c.pid = s.pid
 ORDER BY s.pid;
+"""
+
+
+# ------------------------------------------------------------------- venues
+# Cricsheet writes the same ground several ways ("M Chinnaswamy Stadium" with and
+# without ", Bengaluru"/", Bangalore"); the part before the first comma is the
+# ground. Grounds that were renamed are merged under their current name.
+VENUE_ALIASES = {
+    "Feroz Shah Kotla": "Arun Jaitley Stadium",
+    "Sardar Patel Stadium": "Narendra Modi Stadium",
+    "Punjab Cricket Association Stadium": "Punjab Cricket Association IS Bindra Stadium",
+    "Subrata Roy Sahara Stadium": "Maharashtra Cricket Association Stadium",
+}
+
+
+# Generic ground names used by several different grounds: these keep the city in
+# the venue name. (Most names that appear with two cities are one ground labelled
+# two ways, e.g. "Kensington Oval" with Barbados / Bridgetown, so this is a list.)
+SHARED_GROUND_NAMES = ("County Ground", "The County Ground", "National Stadium", "Nehru Stadium",
+                       "Queen's Park", "Gymkhana Club Ground")
+# Different labels for the same city, so shared-name grounds aren't split further.
+CITY_ALIASES = {"Bangalore": "Bengaluru", "Bombay": "Mumbai", "Madras": "Chennai",
+                "Calcutta": "Kolkata", "Hove": "Brighton"}
+
+
+def venues_sql() -> str:
+    alias = " ".join(f"WHEN '{a}' THEN '{b}'" for a, b in VENUE_ALIASES.items())
+    calias = " ".join(f"WHEN '{a}' THEN '{b}'" for a, b in CITY_ALIASES.items())
+    ground = "trim(regexp_replace(split_part(venue, ',', 1), '\\s+', ' ', 'g'))"
+    city = ("coalesce(nullif(trim(city), ''), "
+            "nullif(trim(regexp_replace(venue, '^[^,]*,?', '')), ''))")
+    shared = "(" + ", ".join("'" + g.replace("'", "''") + "'" for g in SHARED_GROUND_NAMES) + ")"
+    return f"""
+CREATE OR REPLACE TEMP VIEW mv AS
+WITH b AS (
+    SELECT *, CASE {ground} {alias} ELSE {ground} END AS ground,
+           CASE {city} {calias} ELSE {city} END AS city_n
+    FROM m WHERE venue IS NOT NULL
+),
+named AS (
+    SELECT b.*, CASE WHEN b.ground IN {shared} AND b.city_n IS NOT NULL
+                     THEN b.ground || ', ' || b.city_n ELSE b.ground END AS vname
+    FROM b
+)
+SELECT *, regexp_replace(regexp_replace(lower(vname), '[^a-z0-9]+', '-', 'g'), '(^-|-$)', '', 'g')
+          AS venue_id
+FROM named;
+
+CREATE OR REPLACE TABLE venues AS
+SELECT venue_id AS id, mode(vname) AS name, mode(city_n) AS city,
+       count(*)::INTEGER AS matches, min(start_date) AS first_match, max(start_date) AS last_match
+FROM mv GROUP BY venue_id ORDER BY matches DESC;
+
+-- Per venue and format. Limited-overs figures use uninterrupted matches only
+-- (no rain rule); "recent" = the last three calendar years in the data.
+CREATE OR REPLACE TABLE venue_format_stats AS
+WITH inn AS (
+    SELECT match_id, innings, any_value(batting_team) AS team, sum(runs_total) AS runs,
+           sum(wicket_count) FILTER (WHERE wicket_kind NOT IN {NOT_OUT_KINDS} OR wicket_kind IS NULL)
+               AS wkts
+    FROM d GROUP BY ALL
+),
+x AS (
+    SELECT f.format, mv.venue_id, mv.match_id, year(mv.start_date) AS yr, mv.winner, mv.result,
+           mv.method, mv.toss_winner, mv.toss_decision,
+           i1.runs AS r1, i1.wkts AS w1, i1.team AS t1, i2.runs AS r2, i2.team AS t2,
+           (mv.overs = CASE f.format WHEN 'ODI' THEN 50 ELSE 20 END AND mv.method IS NULL) AS clean
+    FROM mv JOIN match_formats f USING (match_id)
+    LEFT JOIN inn i1 ON i1.match_id = mv.match_id AND i1.innings = 1
+    LEFT JOIN inn i2 ON i2.match_id = mv.match_id AND i2.innings = 2
+),
+last AS (SELECT max(yr) AS y FROM x)
+SELECT venue_id, format,
+       count(*)::INTEGER AS matches,
+       min(yr)::INTEGER AS first_year, max(yr)::INTEGER AS last_year,
+       round(avg(r1) FILTER (WHERE clean OR format = 'Test'), 1) AS avg_first_innings,
+       round(avg(r1) FILTER (WHERE (clean OR format = 'Test') AND yr > (SELECT y FROM last) - 3), 1)
+           AS avg_first_innings_recent,
+       count(*) FILTER (WHERE (clean OR format = 'Test') AND yr > (SELECT y FROM last) - 3)::INTEGER
+           AS matches_recent,
+       round(avg(w1) FILTER (WHERE clean OR format = 'Test'), 2) AS avg_first_innings_wickets,
+       CASE WHEN format <> 'Test' THEN round(100.0 * count(*) FILTER (WHERE clean AND winner = t2)
+            / nullif(count(*) FILTER (WHERE clean AND result = 'win'), 0), 1) END AS chasing_win_pct,
+       round(100.0 * count(*) FILTER (WHERE winner = toss_winner)
+             / nullif(count(*) FILTER (WHERE result = 'win'), 0), 1) AS toss_winner_wins_pct,
+       round(100.0 * count(*) FILTER (WHERE toss_decision = 'field')
+             / nullif(count(*) FILTER (WHERE toss_decision IS NOT NULL), 0), 1) AS toss_choose_field_pct,
+       max(greatest(r1, coalesce(r2, 0)))::INTEGER AS highest_total,
+       min(r1) FILTER (WHERE w1 >= 10)::INTEGER AS lowest_all_out_first_innings
+FROM x GROUP BY venue_id, format
+ORDER BY venue_id, format;
+
+-- How each player gets out, per format (retirements excluded).
+CREATE OR REPLACE TABLE player_dismissals AS
+SELECT player_out_id AS player_id, f.format, wicket_kind AS kind, count(*)::INTEGER AS n
+FROM d JOIN match_formats f USING (match_id)
+WHERE is_wicket AND player_out_id IS NOT NULL AND wicket_kind NOT IN {NOT_OUT_KINDS}
+GROUP BY ALL ORDER BY player_id, format, n DESC;
+
+-- Player record at each venue, per format (batting + bowling).
+CREATE OR REPLACE TABLE player_venue_stats AS
+WITH b AS (
+    SELECT bi.pid, bi.format, mv.venue_id, count(DISTINCT bi.match_id) AS bat_matches,
+           count(*) AS innings, sum(bi.runs) AS runs, sum(bi.balls) AS balls,
+           count(*) FILTER (WHERE bi.is_out) AS outs, max(bi.runs) AS highest
+    FROM bat_inn bi JOIN mv USING (match_id) GROUP BY ALL
+),
+w AS (
+    SELECT wi.pid, wi.format, mv.venue_id, sum(wi.balls) AS balls_bowled,
+           sum(wi.runs) AS runs_conceded, sum(wi.wkts) AS wickets
+    FROM bowl_inn wi JOIN mv USING (match_id) GROUP BY ALL
+)
+SELECT pid AS player_id, format, venue_id,
+       coalesce(innings, 0)::INTEGER AS bat_innings, coalesce(runs, 0)::INTEGER AS runs,
+       coalesce(balls, 0)::INTEGER AS balls_faced, highest::INTEGER AS highest,
+       round(runs / nullif(outs, 0), 2) AS bat_avg, round(100.0 * runs / nullif(balls, 0), 2) AS bat_sr,
+       coalesce(balls_bowled, 0)::INTEGER AS balls_bowled,
+       coalesce(runs_conceded, 0)::INTEGER AS runs_conceded,
+       coalesce(wickets, 0)::INTEGER AS wickets,
+       round(6.0 * runs_conceded / nullif(balls_bowled, 0), 2) AS bowl_econ
+FROM b FULL OUTER JOIN w USING (pid, format, venue_id)
+WHERE pid IS NOT NULL
+ORDER BY player_id, format, runs DESC;
 """
 
 
@@ -595,6 +722,14 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
             CREATE OR REPLACE TEMP TABLE people AS
                 SELECT * FROM read_csv('{people_csv.as_posix()}', header = true, all_varchar = true);
         """)
+        # Full names + Wikipedia titles from Wikidata (`gully-pipeline names`); optional.
+        names = Path(__file__).resolve().parents[2] / "reference" / "wikidata_players.csv"
+        if names.exists():
+            con.execute(f"CREATE OR REPLACE TEMP TABLE wd AS SELECT * FROM read_csv("
+                        f"'{names.as_posix()}', header = true, all_varchar = true)")
+        else:
+            con.execute("CREATE OR REPLACE TEMP TABLE wd "
+                        "(cricinfo_id VARCHAR, name_en VARCHAR, wikipedia_title VARCHAR)")
         con.execute(FORMATS_SQL)
         con.execute(INNINGS_SQL)
         con.execute(stats_sql("player_format_stats", ["format"]))
@@ -609,6 +744,8 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         as_ofs = sorted({min(FORM_FIRST_AS_OF, last_year + 1), *range(FORM_FIRST_AS_OF, last_year + 2)})
         con.execute(form_sql([(a, h) for a in as_ofs for h in FORM_HALF_LIVES]))
         con.execute(PLAYERS_SQL)
+        con.execute(venues_sql())
         tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats",
-                  "player_phase_form", "league_strength"]
+                  "player_phase_form", "league_strength", "venues", "venue_format_stats",
+                  "player_dismissals", "player_venue_stats"]
         return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}

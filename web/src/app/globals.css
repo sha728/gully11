@@ -1,26 +1,94 @@
 @import "tailwindcss";
 
+/* Design tokens. Light by default, dark via the OS setting. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --bg: #f6f7f5;
+  --surface: #ffffff;
+  --surface-2: #eef1ec;
+  --border: #dde2da;
+  --text: #15201a;
+  --muted: #5d6b62;
+  --accent: #0f7a4a;        /* pitch green */
+  --accent-soft: #dff1e6;
+  --accent-text: #ffffff;
+  --a-series: #0f7a4a;      /* player A in comparisons */
+  --b-series: #c2410c;      /* player B */
+  --good: #0f7a4a;
+  --warn: #b45309;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #0e1411;
+    --surface: #151d18;
+    --surface-2: #1c2620;
+    --border: #2a362f;
+    --text: #e6ece8;
+    --muted: #94a39a;
+    --accent: #3fbf7f;
+    --accent-soft: #173426;
+    --accent-text: #08130d;
+    --a-series: #3fbf7f;
+    --b-series: #f08a4b;
+    --good: #3fbf7f;
+    --warn: #f0b04b;
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-a: var(--a-series);
+  --color-b: var(--b-series);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Tabular figures everywhere numbers line up in columns. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+table.stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+table.stats th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.stats td {
+  text-align: right;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+table.stats th:first-child,
+table.stats td:first-child {
+  text-align: left;
+}
+table.stats tbody tr:hover {
+  background: var(--surface-2);
 }

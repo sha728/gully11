@@ -79,6 +79,26 @@ def test_players(db):
     assert row(db, "select role from players where id='id_a'")["role"] == "BAT"
 
 
+def test_venues_dismissals_and_venue_splits(db):
+    v = row(db, "select * from venues")
+    assert (v["id"], v["name"], v["city"], v["matches"]) == ("wankhede-stadium", "Wankhede Stadium", "Mumbai", 1)
+    s = row(db, "select * from venue_format_stats where format = 'IPL'")
+    assert (s["matches"], s["highest_total"]) == (1, 6)
+    assert s["chasing_win_pct"] == 0.0  # fixture has no second innings: no chasing side to credit
+    kinds = dict(db.execute("select kind, n from player_dismissals where player_id='id_a' "
+                            "and format='IPL'").fetchall())
+    assert kinds == {"bowled": 1}
+    pv = row(db, "select * from player_venue_stats where player_id='id_c' and format='IPL'")
+    assert (pv["venue_id"], pv["wickets"], pv["runs_conceded"], pv["bat_innings"]) == \
+        ("wankhede-stadium", 1, 6, 0)
+
+
+def test_venue_aliases_merge_renamed_grounds():
+    from gully_pipeline.aggregate import VENUE_ALIASES, venues_sql
+    sql = venues_sql()
+    assert all(f"WHEN '{a}' THEN '{b}'" in sql for a, b in VENUE_ALIASES.items())
+
+
 def test_form_weights_by_recency(tmp_path):
     """Same match played in 2024 and 2022: as of 2025 the 2022 copy weighs
     0.5 ** (2 / half_life); as of 2024 only the 2022 copy exists (no look-ahead)."""

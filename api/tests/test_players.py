@@ -34,6 +34,15 @@ def test_search_fuzzy_surname(client):
     assert top["name"] == "V Kohli" and top["country"] == "India"
 
 
+def test_search_by_full_name(client):
+    """Cricsheet says "RG Sharma"; fans type "Rohit Sharma". Two lesser players are
+    literally named Rohit Sharma, so ties must go to the one with more matches."""
+    top = client.get("/api/v1/players", params={"q": "rohit sharma"}).json()["items"][0]
+    assert top["name"] == "RG Sharma" and top["full_name"] == "Rohit Sharma"
+    top = client.get("/api/v1/players", params={"q": "virat"}).json()["items"][0]
+    assert top["name"] == "V Kohli"
+
+
 def test_search_typo(client):
     r = client.get("/api/v1/players", params={"q": "bumrha"})
     names = [p["name"] for p in r.json()["items"][:5]]

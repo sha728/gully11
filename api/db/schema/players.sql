@@ -3,8 +3,9 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-DROP TABLE IF EXISTS player_phase_form, player_phase_stats, player_season_stats,
-    player_format_stats, players;
+-- Children before parents (foreign keys).
+DROP TABLE IF EXISTS player_venue_stats, player_dismissals, venue_format_stats, venues,
+    player_phase_form, player_phase_stats, player_season_stats, player_format_stats, players;
 
 CREATE TABLE players (
     id                  text PRIMARY KEY,          -- Cricsheet register identifier
@@ -12,6 +13,8 @@ CREATE TABLE players (
     name                text NOT NULL,
     unique_name         text,
     cricinfo_id         text,
+    full_name           text,              -- Wikidata English label
+    wikipedia_title     text,
     country             text,
     role                text NOT NULL CHECK (role IN ('BAT', 'BOWL', 'AR', 'WK')),
     batting_hand        text,
@@ -155,6 +158,63 @@ CREATE TABLE player_phase_form (
 
 CREATE INDEX players_name_trgm ON players USING gin (name gin_trgm_ops);
 CREATE INDEX players_unique_name_trgm ON players USING gin (unique_name gin_trgm_ops);
+CREATE INDEX players_full_name_trgm ON players USING gin (full_name gin_trgm_ops);
 CREATE INDEX players_country ON players (country);
 CREATE INDEX players_role ON players (role);
 CREATE INDEX player_format_stats_format ON player_format_stats (format, player_id);
+
+-- Venues -------------------------------------------------------------------
+CREATE TABLE venues (
+    id          text PRIMARY KEY,           -- slug of the ground name
+    name        text NOT NULL,
+    city        text,
+    matches     integer NOT NULL,
+    first_match date,
+    last_match  date
+);
+
+CREATE TABLE venue_format_stats (
+    venue_id                     text NOT NULL REFERENCES venues (id),
+    format                       text NOT NULL,
+    matches                      integer NOT NULL,
+    first_year                   integer,
+    last_year                    integer,
+    avg_first_innings            double precision,   -- uninterrupted matches only
+    avg_first_innings_recent     double precision,   -- last 3 years in the data
+    matches_recent               integer,
+    avg_first_innings_wickets    double precision,
+    chasing_win_pct              double precision,   -- limited overs only
+    toss_winner_wins_pct         double precision,
+    toss_choose_field_pct        double precision,
+    highest_total                integer,
+    lowest_all_out_first_innings integer,
+    PRIMARY KEY (venue_id, format)
+);
+
+CREATE TABLE player_dismissals (
+    player_id text NOT NULL REFERENCES players (id),
+    format    text NOT NULL,
+    kind      text NOT NULL,
+    n         integer NOT NULL,
+    PRIMARY KEY (player_id, format, kind)
+);
+
+CREATE TABLE player_venue_stats (
+    player_id     text NOT NULL REFERENCES players (id),
+    format        text NOT NULL,
+    venue_id      text NOT NULL REFERENCES venues (id),
+    bat_innings   integer NOT NULL,
+    runs          integer NOT NULL,
+    balls_faced   integer NOT NULL,
+    highest       integer,
+    bat_avg       double precision,
+    bat_sr        double precision,
+    balls_bowled  integer NOT NULL,
+    runs_conceded integer NOT NULL,
+    wickets       integer NOT NULL,
+    bowl_econ     double precision,
+    PRIMARY KEY (player_id, format, venue_id)
+);
+
+CREATE INDEX venues_name_trgm ON venues USING gin (name gin_trgm_ops);
+CREATE INDEX player_venue_stats_venue ON player_venue_stats (venue_id, format);

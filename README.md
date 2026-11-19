@@ -22,8 +22,9 @@ docker compose up -d            # Postgres 16 (+pg_trgm) and Redis
 # Data pipeline
 cd pipeline
 uv sync
-uv run gully-pipeline download --dataset ipl     # or: all
-uv run gully-pipeline parse --dataset ipl
+uv run gully-pipeline download --dataset all     # ~150 MB; or: ipl / tests / odis / t20s
+uv run gully-pipeline parse --dataset all        # -> data/parquet/all (~4 min)
+uv run gully-pipeline build --dataset all        # -> data/gully.duckdb player tables
 uv run pytest
 
 # API

@@ -12,7 +12,10 @@ MATCH = {
         "event": {"name": "Indian Premier League"},
         "venue": "Wankhede Stadium",
         "city": "Mumbai",
+        "team_type": "club",
         "teams": ["Mumbai Indians", "Chennai Super Kings"],
+        "players": {"Mumbai Indians": ["A Batter", "B Runner"],
+                    "Chennai Super Kings": ["C Bowler"]},
         "toss": {"winner": "Mumbai Indians", "decision": "field"},
         "outcome": {"winner": "Chennai Super Kings", "by": {"runs": 5}},
         "overs": 20,
@@ -51,7 +54,8 @@ def test_phase_boundaries():
 
 
 def test_parse_match_rows():
-    match, rows = parse_match("123", MATCH)
+    match, rows, squads = parse_match("123", MATCH)
+    assert len(squads) == 3 and squads[0]["player_id"] == "id_a"
     assert match["winner"] == "Chennai Super Kings" and match["result"] == "win"
     assert len(rows) == 4
     four, wide, bowled, runout = rows

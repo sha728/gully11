@@ -5,6 +5,7 @@ disk) and writes two tables:
 
 * ``deliveries.parquet`` - one row per delivery, legal or not
 * ``matches.parquet``    - one row per match
+* ``match_players.parquet`` - one row per player in each playing XI (+ subs listed)
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ DELIVERY_SCHEMA = pa.schema([
     ("season", pa.string()),
     ("start_date", pa.date32()),
     ("event_name", pa.string()),
+    ("team_type", pa.string()),    # international / club
     ("venue", pa.string()),
     ("city", pa.string()),
     ("innings", pa.int8()),
@@ -53,6 +55,8 @@ DELIVERY_SCHEMA = pa.schema([
     ("runs_batter", pa.int8()),
     ("runs_extras", pa.int8()),
     ("runs_total", pa.int8()),
+    ("is_four", pa.bool_()),       # boundary four (excludes all-run fours)
+    ("is_six", pa.bool_()),
     ("wides", pa.int8()),
     ("noballs", pa.int8()),
     ("byes", pa.int8()),
@@ -65,6 +69,16 @@ DELIVERY_SCHEMA = pa.schema([
     ("player_out", pa.string()),
     ("player_out_id", pa.string()),
     ("bowler_credited", pa.bool_()),  # wicket counts to the bowler
+    ("fielder", pa.string()),         # first fielder named on the dismissal
+    ("fielder_id", pa.string()),
+    ("fielder_is_sub", pa.bool_()),
+])
+
+MATCH_PLAYER_SCHEMA = pa.schema([
+    ("match_id", pa.string()),
+    ("team", pa.string()),
+    ("player", pa.string()),
+    ("player_id", pa.string()),
 ])
 
 MATCH_SCHEMA = pa.schema([
@@ -74,6 +88,7 @@ MATCH_SCHEMA = pa.schema([
     ("season", pa.string()),
     ("start_date", pa.date32()),
     ("event_name", pa.string()),
+    ("team_type", pa.string()),
     ("venue", pa.string()),
     ("city", pa.string()),
     ("team1", pa.string()),
@@ -118,8 +133,8 @@ def _result(outcome: dict) -> tuple[str | None, str | None]:
     return None, outcome.get("result")
 
 
-def parse_match(match_id: str, doc: dict) -> tuple[dict, list[dict]]:
-    """Return (match_row, delivery_rows) for one Cricsheet match document."""
+def parse_match(match_id: str, doc: dict) -> tuple[dict, list[dict], list[dict]]:
+    """Return (match_row, delivery_rows, match_player_rows) for one match document."""
     info = doc["info"]
     people = info.get("registry", {}).get("people", {})
     teams = info.get("teams", [None, None])
@@ -135,6 +150,7 @@ def parse_match(match_id: str, doc: dict) -> tuple[dict, list[dict]]:
         "season": str(info.get("season")) if info.get("season") is not None else None,
         "start_date": date.fromisoformat(dates[0]) if dates[0] else None,
         "event_name": _event_name(info),
+        "team_type": info.get("team_type"),
         "venue": info.get("venue"),
         "city": info.get("city"),
     }
@@ -172,7 +188,10 @@ def parse_match(match_id: str, doc: dict) -> tuple[dict, list[dict]]:
                 first = wickets[0] if wickets else {}
                 kind = first.get("kind")
                 out = first.get("player_out")
+                fielders = first.get("fielders") or [{}]
+                fielder = fielders[0].get("name")
                 runs = d["runs"]
+                boundary = not runs.get("non_boundary", False)
                 rows.append({
                     **common,
                     "innings": inn_no,
@@ -192,6 +211,8 @@ def parse_match(match_id: str, doc: dict) -> tuple[dict, list[dict]]:
                     "runs_batter": runs.get("batter", 0),
                     "runs_extras": runs.get("extras", 0),
                     "runs_total": runs.get("total", 0),
+                    "is_four": boundary and runs.get("batter", 0) == 4,
+                    "is_six": boundary and runs.get("batter", 0) == 6,
                     "wides": wides,
                     "noballs": noballs,
                     "byes": extras.get("byes", 0),
@@ -204,8 +225,17 @@ def parse_match(match_id: str, doc: dict) -> tuple[dict, list[dict]]:
                     "player_out": out,
                     "player_out_id": people.get(out) if out else None,
                     "bowler_credited": bool(wickets) and kind not in NON_BOWLER_DISMISSALS,
+                    "fielder": fielder,
+                    "fielder_id": people.get(fielder) if fielder else None,
+                    "fielder_is_sub": bool(fielders[0].get("substitute", False)),
                 })
-    return match_row, rows
+
+    squad_rows = [
+        {"match_id": match_id, "team": team, "player": name, "player_id": people.get(name)}
+        for team, names in info.get("players", {}).items()
+        for name in names
+    ]
+    return match_row, rows, squad_rows
 
 
 def iter_zip_matches(zip_path: Path) -> Iterator[tuple[str, dict]]:
@@ -225,14 +255,16 @@ def write_parquet(matches: Iterable[tuple[str, dict]], out_dir: Path,
     out_dir.mkdir(parents=True, exist_ok=True)
     n_matches = n_rows = 0
     match_rows: list[dict] = []
+    squad_rows: list[dict] = []
     buf: list[dict] = []
     with pq.ParquetWriter(out_dir / "deliveries.parquet", DELIVERY_SCHEMA,
                           compression="zstd") as writer:
         for match_id, doc in matches:
             if gender and doc["info"].get("gender") != gender:
                 continue
-            m, rows = parse_match(match_id, doc)
+            m, rows, squads = parse_match(match_id, doc)
             match_rows.append(m)
+            squad_rows.extend(squads)
             buf.extend(rows)
             n_matches += 1
             if len(buf) >= batch_rows:
@@ -244,4 +276,6 @@ def write_parquet(matches: Iterable[tuple[str, dict]], out_dir: Path,
             n_rows += len(buf)
     pq.write_table(pa.Table.from_pylist(match_rows, schema=MATCH_SCHEMA),
                    out_dir / "matches.parquet", compression="zstd")
+    pq.write_table(pa.Table.from_pylist(squad_rows, schema=MATCH_PLAYER_SCHEMA),
+                   out_dir / "match_players.parquet", compression="zstd")
     return n_matches, n_rows

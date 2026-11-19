@@ -1,9 +1,10 @@
 import argparse
 import time
 
+from .aggregate import build
 from .download import DATASETS, download_dataset, download_register
 from .parse import iter_zip_matches, write_parquet
-from .paths import PARQUET_DIR, RAW_DIR
+from .paths import DB_PATH, PARQUET_DIR, RAW_DIR
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -17,7 +18,21 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--dataset", choices=DATASETS, default="all")
     s.add_argument("--gender", default="male", help="male / female / any")
 
+    b = sub.add_parser("build", help="Build player tables in DuckDB from parsed Parquet")
+    b.add_argument("--dataset", choices=DATASETS, default="all")
+
     args = p.parse_args(argv)
+
+    if args.cmd == "build":
+        src = PARQUET_DIR / args.dataset
+        if not (src / "deliveries.parquet").exists():
+            p.error(f"{src} has no Parquet; run `parse --dataset {args.dataset}` first")
+        t0 = time.perf_counter()
+        counts = build(src, RAW_DIR / "people.csv", DB_PATH)
+        for table, n in counts.items():
+            print(f"{table:22} {n:>10,}")
+        print(f"-> {DB_PATH} ({time.perf_counter() - t0:.1f}s)")
+        return
 
     if args.cmd == "download":
         print("Downloading", DATASETS[args.dataset], "...")

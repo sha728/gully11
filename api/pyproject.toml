@@ -1,0 +1,23 @@
+[project]
+name = "gully-api"
+version = "0.1.0"
+description = "Gully11 API: stats, simulator, auction rooms"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gully_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

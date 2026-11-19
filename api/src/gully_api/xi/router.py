@@ -27,7 +27,8 @@ class SpinRequest(BaseModel):
 class SeriesRequest(BaseModel):
     format: XIFormat
     seed: int = Field(ge=0, lt=2**32)
-    picks: list[str] = Field(min_length=11, max_length=11, description="one id per spin, in slot order")
+    picks: list[str] = Field(min_length=11, max_length=11, description="one id per spin, in spin order")
+    slots: list[int] = Field(min_length=11, max_length=11, description="batting position (1-11) of each pick")
     daily: bool = False
 
 
@@ -48,7 +49,7 @@ def formats() -> dict[str, Any]:
 def spin(req: SpinRequest, conn=Depends(get_conn)) -> dict[str, Any]:
     """Eleven seeded spins with their candidate lists."""
     seed = req.seed if req.seed is not None else random.randrange(2**32)
-    return {"format": req.format, "seed": seed, "spins": service.spins(conn, req.format, seed)}
+    return {"format": req.format, "seed": seed, "positions": service.SLOTS, "spins": service.spins(conn, req.format, seed)}
 
 
 @router.get("/daily/{format}")
@@ -56,7 +57,7 @@ def daily(format: XIFormat, conn=Depends(get_conn)) -> dict[str, Any]:
     """Today's challenge: the same spins for everyone (UTC day)."""
     day = _today()
     seed = service.daily_seed(format, day)
-    return {"format": format, "seed": seed, "date": day.isoformat(),
+    return {"format": format, "seed": seed, "date": day.isoformat(), "positions": service.SLOTS,
             "spins": service.spins(conn, format, seed)}
 
 
@@ -67,14 +68,14 @@ def series(req: SeriesRequest, conn=Depends(get_conn)) -> dict[str, Any]:
     if req.daily and req.seed != service.daily_seed(req.format, _today()):
         raise HTTPException(422, "That seed isn't today's daily challenge.")
     try:
-        out = service.play_series(conn, req.format, req.seed, req.picks)
+        out = service.play_series(conn, req.format, req.seed, req.picks, req.slots)
     except DraftError as e:
         raise HTTPException(422, str(e)) from e
     full = out.pop("_full")
     conn.execute(
         """INSERT INTO xi_challenges (slug, format, seed, daily, picks, xi, opponent, result, matches)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (slug) DO NOTHING""",
-        (out["slug"], req.format, req.seed, _today() if req.daily else None, Jsonb(req.picks),
+        (out["slug"], req.format, req.seed, _today() if req.daily else None, Jsonb({"ids": req.picks, "slots": req.slots}),
          Jsonb(out["xi"]), out["opponent"], Jsonb(out["result"]), Jsonb(out["matches"])))
     for i, m in enumerate(full, start=1):
         conn.execute(
@@ -90,6 +91,9 @@ def challenge(slug: str, conn=Depends(get_conn)) -> dict[str, Any]:
     if row is None:
         raise HTTPException(404, "Challenge not found")
     row["spins"] = service.spins(conn, row["format"], row["seed"])
+    row["positions"] = service.SLOTS
+    if isinstance(row["picks"], dict):   # {"ids", "slots"}; early challenges stored ids only
+        row["picks"], row["slots"] = row["picks"]["ids"], row["picks"]["slots"]
     row["daily"] = row["daily"].isoformat() if row["daily"] else None
     return row
 

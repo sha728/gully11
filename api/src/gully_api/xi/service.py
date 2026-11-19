@@ -58,6 +58,26 @@ MIN_CANDIDATES = 4         # an era/side combination must offer at least this ma
 LIST_SIZE = 15             # candidates shown per spin
 SERIES_MATCHES = 5
 MAX_OVERSEAS_IPL = 4
+OPENER_MIN_INNINGS = 5     # innings opened in the format...
+OPENER_MIN_SHARE = 0.4     # ...and this share of their innings, to count as an opener
+SPIN_TYPES = ("spin", "orthodox", "break", "unorthodox")   # legends' Wikipedia bowling types
+
+# Batting positions. Each candidate carries the slots it may fill; the keeper must
+# bat in the top six, so slot 6 is the keeper's unless one already bats higher.
+SLOTS = [
+    {"slot": 1, "label": "Opener", "short": "OPEN"},
+    {"slot": 2, "label": "Opener", "short": "OPEN"},
+    {"slot": 3, "label": "No. 3", "short": "TOP"},
+    {"slot": 4, "label": "No. 4", "short": "MID"},
+    {"slot": 5, "label": "No. 5", "short": "MID"},
+    {"slot": 6, "label": "Keeper", "short": "WK"},
+    {"slot": 7, "label": "All-rounder or spinner", "short": "AR/SPIN"},
+    {"slot": 8, "label": "All-rounder or spinner", "short": "AR/SPIN"},
+    {"slot": 9, "label": "Bowler", "short": "BOWL"},
+    {"slot": 10, "label": "Bowler", "short": "BOWL"},
+    {"slot": 11, "label": "Bowler", "short": "BOWL"},
+]
+KEEPER_SLOT = 6
 
 WORLD_XI = json.loads((Path(__file__).parent / "world_xi.json").read_text())
 
@@ -98,6 +118,8 @@ def candidates(conn, fmt: str, era: str, unit: str) -> list[dict]:
                 "role": r["role"], "country": r["country"], "matches": r["matches"], "runs": r["runs"],
                 "bat_avg": r["bat_avg"], "bat_sr": r["bat_sr"], "wickets": r["wickets"],
                 "bowl_econ": r["bowl_econ"], "years": f"{r['format_start']}–{r['format_end']}",
+                "opener": bool(r["opener"]),
+                "spinner": any(t in (r["bowling_type"] or "") for t in SPIN_TYPES),
             })
 
     if y1 > LEGEND_ERA_END:
@@ -116,8 +138,10 @@ def candidates(conn, fmt: str, era: str, unit: str) -> list[dict]:
             rows = conn.execute(
                 """SELECT s.player_id, s.season, s.matches, s.bat_innings, s.not_outs, s.runs, s.balls_faced,
                           s.wickets, s.balls_bowled, s.runs_conceded,
-                          p.name, p.full_name, p.role, p.country, p.era_start, p.era_end
+                          p.name, p.full_name, p.role, p.country, p.era_start, p.era_end, p.bowling_style,
+                          coalesce(o.opened, 0) AS opened, coalesce(o.innings, 0) AS innings
                    FROM player_season_stats s JOIN players p ON p.id = s.player_id
+                   LEFT JOIN player_opening o ON o.player_id = s.player_id AND o.format = s.format
                    WHERE s.format = %s AND s.player_id = ANY(%s)""",
                 (fmt, list({k[0] for k in keep}))).fetchall()
             agg: dict[str, dict] = {}
@@ -144,15 +168,34 @@ def candidates(conn, fmt: str, era: str, unit: str) -> list[dict]:
                     "wickets": a["wickets"],
                     "bowl_econ": round(6 * a["runs_conceded"] / a["balls_bowled"], 2) if a["balls_bowled"] else None,
                     "years": f"{a['y0']}–{a['y1']}" if a["y0"] != a["y1"] else str(a["y0"]),
+                    "opener": a["opened"] >= OPENER_MIN_INNINGS and a["opened"] >= OPENER_MIN_SHARE * a["innings"],
+                    "spinner": a["bowling_style"] == "spin",
                 })
 
     for c in out:
         c["value"] = (c["runs"] or 0) + spec.wicket_value * (c["wickets"] or 0)
+        c["spinner"] = c["spinner"] and c["role"] in ("BOWL", "AR")
+        c["slots"] = eligible_slots(c)
     # One entry per person (a legend who is also in Cricsheet appears once).
     best: dict[str, dict] = {}
     for c in sorted(out, key=lambda c: -c["value"]):
         best.setdefault(c["person"], c)
     return list(best.values())[:LIST_SIZE]
+
+
+def eligible_slots(c: dict) -> list[int]:
+    """Batting positions a player may take: openers at 1-2 (and wherever their role
+    allows); batters, keepers and all-rounders 3-6; all-rounders and spinners 7-8;
+    bowlers and all-rounders 9-11. Slot 6 is also subject to the keeper rule."""
+    role = c["role"]
+    out = [1, 2] if c.get("opener") else []
+    if role in ("BAT", "WK", "AR"):
+        out += [3, 4, 5, 6]
+    if role == "AR" or (role == "BOWL" and c.get("spinner")):
+        out += [7, 8]
+    if role in ("BOWL", "AR"):
+        out += [9, 10, 11]
+    return out
 
 
 def _all_ipl_names(conn) -> list[str]:
@@ -181,11 +224,28 @@ def _rng(*parts) -> random.Random:
     return random.Random(zlib.crc32(":".join(map(str, parts)).encode()))
 
 
+def _fills(c: dict) -> set[int]:
+    """Slots a candidate can fill with the keeper at 6 (the strict reading)."""
+    s = set(c["slots"])
+    return s if c["role"] == "WK" else s - {KEEPER_SLOT}
+
+
 def _feasible(lists: list[list[dict]]) -> bool:
-    """Can some XI drawn one-per-spin include a keeper and five bowling options?"""
-    wk = [i for i, c in enumerate(lists) if any(x["role"] == "WK" for x in c)]
-    bowl = {i for i, c in enumerate(lists) if any(x["role"] in ("BOWL", "AR") for x in c)}
-    return any(len(bowl - {k}) >= 5 for k in wk)
+    """Can all eleven slots be filled, one player per spin? Bipartite matching of
+    spins to slots, with the keeper at 6 so the keeper rule holds as well."""
+    options = [set().union(*(_fills(c) for c in cands)) for cands in lists]
+    spin_in: dict[int, int] = {}          # slot -> spin
+
+    def place(i: int, seen: set[int]) -> bool:
+        for slot in sorted(options[i]):
+            if slot not in seen:
+                seen.add(slot)
+                if slot not in spin_in or place(spin_in[slot], seen):
+                    spin_in[slot] = i
+                    return True
+        return False
+
+    return all(place(i, set()) for i in range(len(lists)))
 
 
 def spins(conn, fmt: str, seed: int) -> list[dict]:
@@ -199,7 +259,7 @@ def spins(conn, fmt: str, seed: int) -> list[dict]:
         picks = [rng.choice(combos) for _ in range(11)]
         lists = [candidates(conn, fmt, era, unit) for era, unit in picks]
         if _feasible(lists):
-            return [{"slot": i + 1, "era": era, "side": unit, "candidates": c}
+            return [{"spin": i + 1, "era": era, "side": unit, "candidates": c}
                     for i, ((era, unit), c) in enumerate(zip(picks, lists))]
     raise RuntimeError("no feasible spin set found")  # practically unreachable
 
@@ -210,16 +270,22 @@ def daily_seed(fmt: str, day: date) -> int:
 
 # ------------------------------------------------------------------ the XI
 
-def validate(conn, fmt: str, seed: int, picks: list[str]) -> list[dict]:
-    """Check a draft against its spins; returns the picked candidate rows in slot order."""
-    if len(picks) != 11:
+def validate(conn, fmt: str, seed: int, picks: list[str], slots: list[int]) -> list[dict]:
+    """Check a draft against its spins. ``picks`` are in spin order and ``slots``
+    gives each pick's batting position. Returns the rows in batting order."""
+    if len(picks) != 11 or len(slots) != 11:
         raise DraftError("Pick exactly 11 players, one per spin.")
+    if sorted(slots) != list(range(1, 12)):
+        raise DraftError("Each batting position from 1 to 11 must be filled once.")
     rows = []
-    for spin, pid in zip(spins(conn, fmt, seed), picks):
+    for spin, pid, slot in zip(spins(conn, fmt, seed), picks, slots):
         match = next((c for c in spin["candidates"] if c["id"] == pid), None)
         if match is None:
-            raise DraftError(f"Slot {spin['slot']}: {pid} isn't on the {spin['era']} {spin['side']} list.")
-        rows.append(match)
+            raise DraftError(f"Spin {spin['spin']}: {pid} isn't on the {spin['era']} {spin['side']} list.")
+        if slot not in match["slots"]:
+            raise DraftError(f"{match['name']} can't bat at {slot} ({SLOTS[slot - 1]['label'].lower()}).")
+        rows.append({**match, "slot": slot})
+    rows.sort(key=lambda r: r["slot"])
     check_rules(fmt, rows)
     return rows
 
@@ -230,18 +296,15 @@ def check_rules(fmt: str, rows: list[dict]) -> None:
         raise DraftError("The same player can't be picked twice.")
     if not any(r["role"] == "WK" for r in rows):
         raise DraftError("Your XI needs a wicketkeeper.")
+    if all("slot" in r for r in rows) and not any(
+            r["role"] == "WK" and r["slot"] <= KEEPER_SLOT for r in rows):
+        raise DraftError("Your keeper has to bat in the top six.")
     if sum(r["role"] in ("BOWL", "AR") for r in rows) < 5:
         raise DraftError("Your XI needs at least five bowling options (bowlers or all-rounders).")
     if fmt == "IPL":
         overseas = sum(1 for r in rows if r.get("country") and r["country"] != "India")
         if overseas > MAX_OVERSEAS_IPL:
             raise DraftError(f"IPL sides can field at most {MAX_OVERSEAS_IPL} overseas players.")
-
-
-def batting_order(rows: list[dict]) -> list[dict]:
-    """Batters and keepers by batting average, then all-rounders, then bowlers."""
-    rank = {"BAT": 0, "WK": 0, "AR": 1, "BOWL": 2}
-    return sorted(rows, key=lambda r: (rank[r["role"]], -(r.get("bat_avg") or 0)))
 
 
 def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
@@ -278,15 +341,16 @@ def world_xi(conn, fmt: str) -> Team:
     return Team(cfg["name"], [prof[i] for i in cfg["players"]], keeper=cfg["keeper"])
 
 
-def challenge_slug(fmt: str, seed: int, picks: list[str]) -> str:
-    return hashlib.blake2b(f"{fmt}:{seed}:{','.join(picks)}".encode(), digest_size=6).hexdigest()
+def challenge_slug(fmt: str, seed: int, picks: list[str], slots: list[int]) -> str:
+    key = f"{fmt}:{seed}:{','.join(picks)}:{','.join(map(str, slots))}"
+    return hashlib.blake2b(key.encode(), digest_size=6).hexdigest()
 
 
-def play_series(conn, fmt: str, seed: int, picks: list[str], name: str = "Your XI") -> dict:
-    """Validate, then play five seeded matches against the World XI.
-    Returns a summary plus the full match records."""
-    rows = validate(conn, fmt, seed, picks)
-    ordered = batting_order(rows)
+def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
+                name: str = "Your XI") -> dict:
+    """Validate, then play five seeded matches against the World XI, batting in the
+    chosen order. Returns a summary plus the full match records."""
+    ordered = validate(conn, fmt, seed, picks, slots)
     prof = profiles(conn, fmt, [r["id"] for r in ordered])
     keeper = next(r["id"] for r in ordered if r["role"] == "WK")
     mine = Team(name, [prof[r["id"]] for r in ordered], keeper=keeper)
@@ -310,9 +374,9 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], name: str = "Your X
     w, l = tally["won"], tally["lost"]
     verdict = ("Series won" if w > l else "Series lost" if l > w else "Series drawn") + f" {w}–{l}"
     return {
-        "slug": challenge_slug(fmt, seed, picks),
-        "format": fmt, "seed": seed, "picks": picks, "opponent": them.name,
-        "xi": [{**r, "order": i + 1} for i, r in enumerate(ordered)],
+        "slug": challenge_slug(fmt, seed, picks, slots),
+        "format": fmt, "seed": seed, "picks": picks, "slots": slots, "opponent": them.name,
+        "xi": [{**r, "order": r["slot"]} for r in ordered],
         "result": {**tally, "verdict": verdict},
         "matches": [_summary(m, i + 1) for i, m in enumerate(matches)],
         "_full": [m.to_dict() for m in matches],

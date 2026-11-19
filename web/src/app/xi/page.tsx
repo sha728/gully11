@@ -11,8 +11,8 @@ export const metadata: Metadata = {
 };
 
 const STEPS = [
-  ["Spin", "Eleven spins, one per slot. Each lands on an era and a nation, or an IPL franchise."],
-  ["Draft", "Pick one player from each spin. You need a keeper, five bowling options and, in the IPL, four overseas at most."],
+  ["Spin", "Hit spin eleven times. Each lands on a decade and a nation, or an IPL franchise and era."],
+  ["Draft", "Take one player per spin and set the batting order: openers at the top, the keeper in the top six, spinners and all-rounders at 7–8, bowlers at the tail."],
   ["Play", "Five matches against a World XI on the same ball-by-ball engine as the rest of the site."],
 ] as const;
 

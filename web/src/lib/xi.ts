@@ -28,10 +28,21 @@ export interface Candidate {
   bowl_econ: number | null;
   years: string;
   value: number;
+  /** Opened in at least 40% of their innings in this format. */
+  opener: boolean;
+  spinner: boolean;
+  /** Batting positions (1-11) this player may take. */
+  slots: number[];
+}
+
+export interface Position {
+  slot: number;
+  label: string;
+  short: string;
 }
 
 export interface Spin {
-  slot: number;
+  spin: number;
   era: string;
   side: string;
   candidates: Candidate[];
@@ -41,6 +52,7 @@ export interface SpinSet {
   format: XIFormat;
   seed: number;
   date?: string;
+  positions: Position[];
   spins: Spin[];
 }
 
@@ -68,6 +80,7 @@ export interface Challenge {
   seed: number;
   daily: string | null;
   picks: string[];
+  slots?: number[];
   xi: (Candidate & { order: number })[];
   opponent: string;
   result: SeriesResult;
@@ -139,11 +152,19 @@ export const xiApi = {
   spin: (format: XIFormat, seed?: number) =>
     call<SpinSet>("/xi/spin", { method: "POST", body: JSON.stringify({ format, seed }) }),
   daily: (format: XIFormat) => call<SpinSet>(`/xi/daily/${format}`),
-  series: (format: XIFormat, seed: number, picks: string[], daily = false) =>
-    call<Challenge>("/xi/series", { method: "POST", body: JSON.stringify({ format, seed, picks, daily }) }),
+  series: (format: XIFormat, seed: number, picks: string[], slots: number[], daily = false) =>
+    call<Challenge>("/xi/series", { method: "POST", body: JSON.stringify({ format, seed, picks, slots, daily }) }),
   challenge: (slug: string) => call<Challenge>(`/xi/challenge/${encodeURIComponent(slug)}`),
   match: (slug: string, n: number) => call<FullMatch>(`/xi/challenge/${encodeURIComponent(slug)}/match/${n}`),
 };
 
 export const isOverseas = (c: Pick<Candidate, "country">) => !!c.country && c.country !== "India";
-export const BOWLING_ROLES: Role[] = ["BOWL", "AR"];
+export const KEEPER_SLOT = 6;
+
+/** Can ``c`` bat at ``slot``, given who else bats where? Slot 6 is the keeper's
+ * unless a keeper already bats in the top five. */
+export function fits(c: Candidate, slot: number, bySlot: (Candidate | null)[]): boolean {
+  if (!c.slots.includes(slot)) return false;
+  if (slot !== KEEPER_SLOT || c.role === "WK") return true;
+  return bySlot.some((p, i) => p && p.role === "WK" && i + 1 < KEEPER_SLOT && p.id !== c.id);
+}

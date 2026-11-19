@@ -14,6 +14,7 @@ const NAV = [
   { href: "/players", label: "Players" },
   { href: "/compare", label: "Head to head" },
   { href: "/xi", label: "XI Builder" },
+  { href: "/auction", label: "Auction" },
   { href: "/venues", label: "Grounds" },
 ];
 

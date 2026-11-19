@@ -39,3 +39,13 @@ CREATE TABLE IF NOT EXISTS xi_drafts (
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- A finished auction (live rooms are held in the API process while they run).
+CREATE TABLE IF NOT EXISTS auction_rooms (
+    code        text PRIMARY KEY,
+    mode        text NOT NULL,              -- 'mega' (later 'mini')
+    teams       integer NOT NULL,
+    result      jsonb NOT NULL,             -- squads, spend, best-value buys
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    ended_at    timestamptz
+);

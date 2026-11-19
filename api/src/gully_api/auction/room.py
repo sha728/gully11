@@ -1,0 +1,397 @@
+"""Auction room: the rules engine and bots, with no I/O.
+
+Time is passed in (``now``, seconds), so the whole auction can be driven by a test
+clock. The live layer (``live.py``) calls ``tick`` a few times a second and
+broadcasts ``view()`` to everyone in the room.
+
+Flow: lobby → live (lot after lot, set by set) → accelerated round (unsold players
+again, shorter clock) → ended. Each lot opens at the player's base price; any
+franchise can bid the next increment; each bid resets the clock. When it runs
+out, the player is sold to the highest bidder or goes unsold.
+
+Every bid is checked: not already leading, squad not full, overseas cap, and
+enough purse left to fill the rest of the minimum squad at the lowest base price.
+
+A franchise can **pass** on a lot. Once every human has passed (or can't bid),
+the bots settle the lot at once, so a game with bots only takes time on the
+players people actually want.
+"""
+
+from __future__ import annotations
+
+import random
+import secrets
+import string
+from dataclasses import dataclass, field
+
+from .pool import make_sets, set_label
+
+FRANCHISES = [
+    ("CSK", "Chennai Super Kings"), ("MI", "Mumbai Indians"), ("RCB", "Royal Challengers Bengaluru"),
+    ("KKR", "Kolkata Knight Riders"), ("SRH", "Sunrisers Hyderabad"), ("RR", "Rajasthan Royals"),
+    ("DC", "Delhi Capitals"), ("PBKS", "Punjab Kings"), ("GT", "Gujarat Titans"), ("LSG", "Lucknow Super Giants"),
+]
+
+# How bots build a squad (players per role) and how freely they spend.
+SQUAD_PLAN = {"BAT": 6, "WK": 2, "AR": 5, "BOWL": 8}
+PERSONALITIES = {"aggressive": 1.15, "balanced": 1.0, "value": 0.88}
+RICH_PER_SLOT = 560        # lakh per open squad slot that counts as an ordinary budget (120 cr / 21)
+MAX_OVER_FAIR = 1.4        # bots pay at most this times the fair price, plus their richness
+
+
+class AuctionError(ValueError):
+    """A move the rules don't allow (message says why)."""
+
+
+def increment(price: int, rules: dict) -> int:
+    for limit, step in rules["increments"]:
+        if limit is None or price < limit:
+            return step
+    raise AssertionError("increments must end with an open slab")
+
+
+@dataclass
+class Franchise:
+    id: str
+    name: str
+    bot: bool
+    purse: int
+    personality: str = "balanced"
+    owner: str | None = None             # nickname of the human who claimed it
+    token: str | None = None             # secret the human's client holds
+    squad: list[dict] = field(default_factory=list)   # {"id", "price"}
+
+    def count(self, pool: dict, role: str | None = None, overseas: bool | None = None) -> int:
+        return sum(1 for s in self.squad
+                   if (role is None or pool[s["id"]]["role"] == role)
+                   and (overseas is None or pool[s["id"]]["overseas"] == overseas))
+
+
+@dataclass
+class Lot:
+    player: str
+    set_code: str
+    accelerated: bool
+    ends_at: float
+    price: int | None = None             # current highest bid; None until someone bids
+    leader: str | None = None
+    bids: list[dict] = field(default_factory=list)
+    passed: set[str] = field(default_factory=set)
+
+
+class Room:
+    def __init__(self, code: str, mode: str, rules: dict, pool: list[dict], teams: int, humans: int,
+                 speed: str = "normal", seed: int | None = None, host: str = "Host"):
+        if not 2 <= teams <= len(FRANCHISES):
+            raise AuctionError(f"Between 2 and {len(FRANCHISES)} franchises.")
+        if not 1 <= humans <= teams:
+            raise AuctionError("At least one franchise has to be yours.")
+        self.code, self.mode, self.rules, self.speed = code, mode, rules, speed
+        self.rng = random.Random(seed)
+        self.pool = {p["id"]: p for p in pool}
+        # Sets in order; players shuffled within each set, as at the real auction.
+        self.sets: list[tuple[str, list[str]]] = []
+        for set_code, players in make_sets(pool, rules):
+            ids = [p["id"] for p in players]
+            self.rng.shuffle(ids)
+            self.sets.append((set_code, ids))
+        self.queue: list[tuple[str, str]] = [(c, pid) for c, ids in self.sets for pid in ids]
+        self.total_lots = len(self.queue)
+        picks = self.rng.sample(FRANCHISES, teams)
+        kinds = list(PERSONALITIES)
+        self.franchises: dict[str, Franchise] = {}
+        for i, (fid, name) in enumerate(picks):
+            self.franchises[fid] = Franchise(fid, name, bot=i >= humans, purse=rules["purse_lakh"],
+                                             personality=self.rng.choice(kinds))
+        self.phase = "lobby"
+        self.lot: Lot | None = None
+        self.accelerated = False
+        self.log: list[dict] = []            # sold / unsold, newest last
+        self.unsold: list[str] = []
+        self.presented = 0
+        self.main_presented = 0              # lots shown before the accelerated round
+        self.version = 0
+        self.host_token: str | None = None
+        self.online: set[str] | None = None  # franchises with someone connected (None = assume all)
+        self._bot_due: dict[str, float] = {}
+        self._noise: dict[tuple[str, str], float] = {}
+        first = self.claim(host)
+        self.host_token = first.token
+
+    # ------------------------------------------------------------ people
+    def claim(self, nickname: str) -> Franchise:
+        """A human joins: they take the next free human franchise."""
+        nickname = nickname.strip()[:24] or "Player"
+        for f in self.franchises.values():
+            if not f.bot and f.owner is None:
+                f.owner, f.token = nickname, secrets.token_urlsafe(16)
+                self._touch()
+                return f
+        raise AuctionError("Every franchise is taken. Ask the host to add more seats.")
+
+    def by_token(self, token: str | None) -> Franchise | None:
+        return next((f for f in self.franchises.values() if token and f.token == token), None)
+
+    # ------------------------------------------------------------ timing
+    def _timer(self, kind: str) -> float:
+        t = self.rules["timers"][self.speed]
+        return t[f"accelerated_{kind}" if self.accelerated else kind]
+
+    def start(self, now: float, token: str | None) -> None:
+        if token != self.host_token:
+            raise AuctionError("Only the host can start the auction.")
+        if self.phase != "lobby":
+            raise AuctionError("The auction has already started.")
+        for f in self.franchises.values():           # empty human seats become bots
+            if not f.bot and f.owner is None:
+                f.bot = True
+        self.phase = "live"
+        self._next_lot(now)
+
+    def _next_lot(self, now: float) -> None:
+        self.lot = None
+        if all(len(f.squad) >= self.rules["squad_max"] for f in self.franchises.values()):
+            return self._end()
+        while not self.queue:
+            needy = any(len(f.squad) < self.rules["squad_min"] for f in self.franchises.values())
+            if self.accelerated or not self.unsold or not needy:
+                return self._end()
+            # Accelerated round: the unsold players again, best first, shorter clock.
+            self.accelerated = True
+            self.main_presented = self.presented
+            again = sorted(self.unsold, key=lambda pid: -self.pool[pid]["fair"])
+            self.unsold = []
+            self.queue = [("ACC", pid) for pid in again]
+        set_code, pid = self.queue.pop(0)
+        self.presented += 1
+        self.lot = Lot(pid, set_code, self.accelerated, ends_at=now + self._timer("open"))
+        self._bot_due = {}
+        self._touch()
+
+    def _end(self) -> None:
+        self.phase = "ended"
+        self.lot = None
+        self._touch()
+
+    def _touch(self) -> None:
+        self.version += 1
+
+    # ------------------------------------------------------------ bidding
+    def next_amount(self) -> int:
+        lot = self._open_lot()
+        base = self.pool[lot.player]["base"]
+        return base if lot.price is None else lot.price + increment(lot.price, self.rules)
+
+    def _open_lot(self) -> Lot:
+        if self.phase != "live" or self.lot is None:
+            raise AuctionError("No player is up right now.")
+        return self.lot
+
+    def why_not(self, f: Franchise, amount: int | None = None) -> str | None:
+        """Why this franchise can't bid ``amount`` on the current lot, or None."""
+        lot = self._open_lot()
+        amount = self.next_amount() if amount is None else amount
+        p = self.pool[lot.player]
+        r = self.rules
+        if lot.leader == f.id:
+            return "You're already the highest bidder."
+        if len(f.squad) >= r["squad_max"]:
+            return f"Your squad is full ({r['squad_max']})."
+        if p["overseas"] and f.count(self.pool, overseas=True) >= r["overseas_max"]:
+            return f"You already have {r['overseas_max']} overseas players."
+        still_needed = max(0, r["squad_min"] - len(f.squad) - 1)
+        reserve = still_needed * min(r["base_prices"])
+        if amount > f.purse - reserve:
+            return (f"Not enough purse: you need to keep ₹{reserve / 100:g} cr to fill your squad."
+                    if reserve else "Not enough purse.")
+        return None
+
+    def bid(self, fid: str, amount: int, now: float) -> None:
+        lot = self._open_lot()
+        f = self.franchises[fid]
+        if now >= lot.ends_at:
+            raise AuctionError("Too late: the hammer has come down.")
+        want = self.next_amount()
+        if amount != want:
+            raise AuctionError(f"The next bid is ₹{want / 100:g} cr.")   # someone got in first
+        reason = self.why_not(f, amount)
+        if reason:
+            raise AuctionError(reason)
+        self._apply(fid, amount, now)
+
+    def _apply(self, fid: str, amount: int, now: float) -> None:
+        lot = self.lot
+        lot.price, lot.leader = amount, fid
+        lot.bids.append({"franchise": fid, "amount": amount, "at": now})
+        lot.passed.discard(fid)
+        lot.ends_at = now + self._timer("bid")
+        self._bot_due = {}
+        self._touch()
+
+    def pass_(self, fid: str) -> None:
+        lot = self._open_lot()
+        if lot.leader == fid:
+            raise AuctionError("You're the highest bidder: you can't pass.")
+        lot.passed.add(fid)
+        self._touch()
+
+    # ------------------------------------------------------------ bots
+    def bot_limit(self, f: Franchise, pid: str) -> int:
+        """The most this bot will pay for the player (0 = not interested)."""
+        p = self.pool[pid]
+        r = self.rules
+        have = f.count(self.pool, role=p["role"])
+        plan = SQUAD_PLAN[p["role"]]
+        need = 1.15 if have < plan / 2 else 1.0 if have < plan else 0.45
+        slots_left = r["squad_max"] - len(f.squad)
+        short = r["squad_min"] - len(f.squad)
+        if short > 0 and self.lots_left() <= short * 3:
+            need = max(need, 1.2)            # running out of players: fill the squad
+        if slots_left <= 0:
+            return 0
+        key = (f.id, pid)
+        if key not in self._noise:
+            self._noise[key] = self.rng.uniform(0.85, 1.15)
+        # Money burns a hole: plenty of purse per slot still to fill means bidding harder.
+        planned = max(1, sum(SQUAD_PLAN.values()) - len(f.squad))
+        rich = min(max((f.purse / planned) / RICH_PER_SLOT, 0.8), 4.0) ** 0.6
+        limit = p["fair"] * need * rich * PERSONALITIES[f.personality] * self._noise[key]
+        limit = min(limit, p["fair"] * (MAX_OVER_FAIR + rich - 1))
+        if short > 0:
+            limit = max(limit, p["base"])     # short of a legal squad: anyone at base will do
+        reserve = max(0, r["squad_min"] - len(f.squad) - 1) * min(r["base_prices"])
+        # Don't blow the purse on one player while the squad is still thin.
+        spread = (f.purse - reserve) / max(1, min(short, 6)) * 2 if short > 1 else f.purse - reserve
+        return int(min(limit, f.purse - reserve, max(spread, p["base"])))
+
+    def lots_left(self) -> int:
+        return len(self.queue) + (len(self.unsold) if not self.accelerated else 0)
+
+    def _bot_wants(self, f: Franchise) -> bool:
+        if not f.bot or self.lot is None:
+            return False
+        amount = self.next_amount()
+        return self.why_not(f, amount) is None and self.bot_limit(f, self.lot.player) >= amount
+
+    def _bots_act(self, now: float) -> None:
+        lot = self.lot
+        for f in self.franchises.values():
+            if not self._bot_wants(f):
+                self._bot_due.pop(f.id, None)
+                continue
+            if f.id not in self._bot_due:
+                self._bot_due[f.id] = now + self._bot_delay()
+        due = [(t, fid) for fid, t in self._bot_due.items() if t <= now and t < lot.ends_at]
+        if due:
+            _, fid = min(due)
+            self.bid(fid, self.next_amount(), now)
+
+    def _bot_delay(self) -> float:
+        """Bots answer quickly when only bots are in the bidding (a human isn't
+        watching for a chance to come in), and more like a person otherwise."""
+        lot = self.lot
+        humans_in = any(not self.franchises[b["franchise"]].bot for b in lot.bids)
+        fast = self.speed == "fast"
+        if not humans_in and lot.bids:
+            return self.rng.uniform(0.25, 0.7) if fast else self.rng.uniform(0.4, 1.0)
+        return self.rng.uniform(0.6, 1.8) if fast else self.rng.uniform(1.0, 3.0)
+
+    def _humans_done(self) -> bool:
+        """No human can still act on this lot: settle it with the bots at once."""
+        lot = self.lot
+        for f in self.franchises.values():
+            if f.bot:
+                continue
+            if lot.leader == f.id:
+                return False
+            if self.online is not None and f.id not in self.online:
+                continue                     # nobody at this franchise's table right now
+            if f.id not in lot.passed and self.why_not(f) is None:
+                return False
+        return True
+
+    def _settle_with_bots(self, now: float) -> None:
+        while True:
+            wanting = [f for f in self.franchises.values() if self._bot_wants(f)]
+            if not wanting:
+                return
+            f = self.rng.choice(wanting)
+            self._apply(f.id, self.next_amount(), now)
+
+    # ------------------------------------------------------------ clock
+    def tick(self, now: float) -> None:
+        if self.phase != "live" or self.lot is None:
+            return
+        if self._humans_done():
+            self._settle_with_bots(now)
+            return self._hammer(now)
+        if now >= self.lot.ends_at:
+            return self._hammer(now)
+        self._bots_act(now)
+
+    def _hammer(self, now: float) -> None:
+        lot = self.lot
+        p = self.pool[lot.player]
+        if lot.leader:
+            f = self.franchises[lot.leader]
+            f.purse -= lot.price
+            f.squad.append({"id": lot.player, "price": lot.price})
+            self.log.append({"player": lot.player, "name": p["name"], "result": "sold", "franchise": f.id,
+                             "price": lot.price, "fair": p["fair"], "bids": len(lot.bids)})
+        else:
+            if not lot.accelerated:
+                self.unsold.append(lot.player)
+            self.log.append({"player": lot.player, "name": p["name"], "result": "unsold", "base": p["base"]})
+        self._next_lot(now)
+
+    # ------------------------------------------------------------ views
+    def view(self) -> dict:
+        """Everything a client may see (no tokens, no bot limits)."""
+        lot = self.lot
+        upcoming = [pid for _, pid in self.queue[:6]]
+        out = {
+            "code": self.code, "mode": self.mode, "phase": self.phase, "speed": self.speed,
+            "version": self.version, "accelerated": self.accelerated,
+            "presented": self.presented, "total": self.total_lots,
+            # Position within the current round: main pass, or the accelerated round.
+            "round": ({"n": self.presented - self.main_presented, "of": self.presented - self.main_presented + len(self.queue)}
+                      if self.accelerated else {"n": self.presented, "of": self.total_lots}),
+            "rules": {k: self.rules[k] for k in ("purse_lakh", "squad_min", "squad_max", "overseas_max", "increments")},
+            "franchises": [{
+                "id": f.id, "name": f.name, "bot": f.bot, "owner": f.owner, "personality": f.personality if f.bot else None,
+                "purse": f.purse, "squad": f.squad, "size": len(f.squad),
+                "overseas": f.count(self.pool, overseas=True),
+                "roles": {r: f.count(self.pool, role=r) for r in SQUAD_PLAN},
+            } for f in self.franchises.values()],
+            "lot": None if lot is None else {
+                "player": self.pool[lot.player], "set": lot.set_code,
+                "set_label": "Accelerated round" if lot.accelerated else set_label(lot.set_code),
+                "price": lot.price, "leader": lot.leader, "ends_at": lot.ends_at,
+                "next": self.next_amount(), "bids": lot.bids[-8:], "passed": sorted(lot.passed),
+            },
+            "upcoming": [self.pool[pid] for pid in upcoming],
+            "log": self.log[-30:],
+            "players": {s["id"]: self.pool[s["id"]] for f in self.franchises.values() for s in f.squad},
+        }
+        if self.phase == "ended":
+            out["result"] = self.summary()
+        return out
+
+    def summary(self) -> dict:
+        """The finished auction: squads, spend and the best value buys."""
+        sold = [e for e in self.log if e["result"] == "sold"]
+        value = sorted(sold, key=lambda e: e["fair"] - e["price"], reverse=True)[:5]
+        return {
+            "franchises": [{"id": f.id, "name": f.name, "bot": f.bot, "owner": f.owner,
+                            "spent": self.rules["purse_lakh"] - f.purse, "purse": f.purse,
+                            "squad": [{**s, "player": self.pool[s["id"]]} for s in f.squad]}
+                           for f in self.franchises.values()],
+            "sold": len(sold),
+            # Players never sold (one passed over twice, main and accelerated round, counts once).
+            "unsold": len({e["player"] for e in self.log if e["result"] == "unsold"} - {e["player"] for e in sold}),
+            "best_value": value,
+        }
+
+
+def room_code() -> str:
+    return "".join(secrets.choice(string.ascii_uppercase.replace("O", "").replace("I", "")) for _ in range(6))

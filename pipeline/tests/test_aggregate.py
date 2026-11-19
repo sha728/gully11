@@ -79,6 +79,30 @@ def test_players(db):
     assert row(db, "select role from players where id='id_a'")["role"] == "BAT"
 
 
+def test_form_weights_by_recency(tmp_path):
+    """Same match played in 2024 and 2022: as of 2025 the 2022 copy weighs
+    0.5 ** (2 / half_life); as of 2024 only the 2022 copy exists (no look-ahead)."""
+    old = {**MATCH, "info": {**MATCH["info"], "dates": ["2022-04-01"], "season": 2022}}
+    write_parquet([("1", MATCH), ("2", old)], tmp_path / "pq")
+    people = tmp_path / "people.csv"
+    people.write_text("identifier,name,unique_name,key_cricinfo\n"
+                      "id_a,A Batter,A Batter,1\nid_b,B Runner,B Runner,2\nid_c,C Bowler,C Bowler,3\n")
+    build(tmp_path / "pq", people, tmp_path / "t.duckdb")
+    with duckdb.connect(str(tmp_path / "t.duckdb"), read_only=True) as con:
+        def balls(as_of, h):
+            return con.execute(
+                "SELECT balls, exp_fours FROM player_phase_form WHERE pid='id_a' AND format='IPL' "
+                "AND phase='PP' AND role='bat' AND as_of=? AND half_life=?", [as_of, h]).fetchone()
+        assert balls(2025, 0)[0] == pytest.approx(4)          # career: 2 + 2 balls
+        assert balls(2025, 2)[0] == pytest.approx(2 + 0.5 * 2)
+        assert balls(2025, 1)[0] == pytest.approx(2 + 0.25 * 2)
+        assert balls(2024, 2)[0] == pytest.approx(2 ** 0.5)   # only 2022, one year back
+        # expected counts are weighted the same way as observed ones
+        b0, e0 = balls(2025, 0)
+        b2, e2 = balls(2025, 2)
+        assert e2 / b2 == pytest.approx(e0 / b0)
+
+
 def test_season_stats(db):
     s = row(db, "select * from player_season_stats where player_id='id_a' and format='IPL'")
     assert s["season"] == "2024" and s["runs"] == 4

@@ -33,6 +33,11 @@ overs in a row, and keeps the two best death bowlers' last overs for the death.
   `sim/data/base_rates.json`.
 - **Legends** (no ball-by-ball data) are estimated from career average and
   strike rate by tilting the league distribution, and are marked `estimated`.
+- **Recent form.** `player_phase_form` holds recency-weighted counts. Each
+  year before `as_of` is weighted 0.5^((as_of − 1 − year) / half_life). The
+  pipeline builds a grid of as_of years (2024 to the current year) and half-lives
+  (0 = none, 1, 2, 4), so validation can rate players as they stood before each
+  season. Postgres gets only the current ratings, with the 4-year half-life.
 
 ## Data files (regenerate after a data refresh)
 
@@ -45,17 +50,46 @@ overs in a row, and keeps the two best death bowlers' last overs for the death.
 
 `uv run python scripts/validate_sim.py --fit 2024 2025 --years 2026 2026`
 
-The replay uses the real XIs, batting orders, bowlers and toss outcome,
-20 simulations per match. Results on 72 matches the calibration never saw:
+The replay uses the real squads and toss outcome. Batting order and bowlers
+come from pre-match information only, and players are rated as they stood
+before each season (form ratings, 4-year half-life). 20 simulations per
+match. Results on 72 matches neither the ratings nor the calibration had seen:
 
 | Metric | Real | Sim | Diff |
 | --- | --- | --- | --- |
-| First-innings total, mean | 195.1 | 190.3 | −2.5% (pass, target ±5%) |
-| First-innings total, sd | 36.8 | 37.4 | +1.6% |
-| Boundaries per legal ball | 0.225 | 0.219 | −2.8% (pass) |
-| Wickets per legal ball | 0.053 | 0.053 | +0.5% (pass) |
-| Extras per innings | 8.9 | 9.3 | +4.7% |
-| Chasing side wins | 62.5% | 52.2% | 2024–25 real was ~51%; one season is noisy |
+| First-innings total, mean | 195.1 | 190.5 | −2.4% (pass, target ±5%) |
+| First-innings total, sd | 36.8 | 37.6 | +1.9% |
+| Boundaries per legal ball | 0.225 | 0.219 | −2.6% (pass) |
+| Wickets per legal ball | 0.053 | 0.052 | −1.1% (pass) |
+| Extras per innings | 8.9 | 9.1 | +2.8% |
+| Chasing side wins | 62.5% | 51.7% | 2024–25 real was ~51%; one season is noisy |
+
+### Does it pick winners? (2024–26, 213 matches, 40 sims each)
+
+| Ratings | Brier (coin flip 0.25) | Picks winner |
+| --- | --- | --- |
+| Career, includes the replayed matches | 0.260 | 53.2% |
+| Form as of season, no decay | 0.279 | 49.0% |
+| Form, half-life 1 / 2 / 4 years | 0.280 / 0.286 / 0.287 | 49.3% / 48.5% / 48.3% |
+| Form, IPL-only data, half-life 0 / 4 | 0.270 / 0.263 | 55.8% / 55.5% |
+
+What this shows:
+
+- **Recency weighting doesn't measurably help.** All half-lives are within
+  noise of each other. The 4-year default is a judgment call for face
+  validity, since old form shouldn't count fully, not a measured gain.
+- **Ratings mixed across leagues carry no predictive signal.** Same-league
+  (IPL-only) ratings pick about 56%, roughly what betting markets manage on
+  the IPL. A rating earned against a weaker league's average is inflated, so
+  players from different leagues aren't comparable. This is the main open
+  problem (see below).
+- **The simulator is overconfident.** Player ratings spread the per-match win
+  chance with an sd of 0.144, while role structure alone gives 0.022. Brier
+  stays above 0.25 because that spread isn't backed by enough signal.
+- **An earlier version of this check leaked the result in reverse.** It built
+  line-ups from the scorecard, so teams that chased easily had their unused
+  middle order placed below the tail. That produced a −0.25 correlation with
+  real results. Line-ups now use pre-match information only.
 
 Without calibration the simulator already landed within 1.5% on mean score,
 but 4–8% high on boundaries and wickets. League-average players reproduce the
@@ -65,10 +99,10 @@ stronger with bat and ball.
 
 ## Known gaps / next steps
 
-- **Team strength signal is weak.** Simulated vs. real win % per team-season
-  correlates at about 0 (n = 30, noisy). Ratings are career-long. Recency
-  weighting, and ratings adjusted for opposition strength across competitions,
-  are the next improvements.
+- **League-strength adjustment (next).** Estimate a strength factor per
+  competition from players who appear in several, so that a rating earned in
+  any league is on one scale. Expected to recover the same-league signal for
+  every player, and to reduce overconfidence.
 - Calibration is per environment. Only `IPL_recent` is fitted; other
   environments run uncalibrated until fitted on their own matches.
 - Free hits, super overs (ties stand as ties), DLS and Test matches are not

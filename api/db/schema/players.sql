@@ -3,7 +3,8 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-DROP TABLE IF EXISTS player_phase_stats, player_season_stats, player_format_stats, players;
+DROP TABLE IF EXISTS player_phase_form, player_phase_stats, player_season_stats,
+    player_format_stats, players;
 
 CREATE TABLE players (
     id                  text PRIMARY KEY,          -- Cricsheet register identifier
@@ -90,6 +91,38 @@ CREATE TABLE player_phase_stats (
     economy        double precision,
     -- Expected counts had an average player faced/bowled the same balls in the
     -- same competitions, years and phases (context-adjusted baseline).
+    exp_wickets      double precision,
+    exp_dots         double precision,
+    exp_ones         double precision,
+    exp_twos         double precision,
+    exp_threes       double precision,
+    exp_fours        double precision,
+    exp_sixes        double precision,
+    exp_wide_balls   double precision,
+    exp_noball_balls double precision,
+    PRIMARY KEY (player_id, format, phase, role)
+);
+
+-- Simulator ratings input: recency-weighted phase counts (fractional), current
+-- as of `as_of` (first year NOT included) with `half_life` years of decay.
+-- Same count columns as player_phase_stats, so the simulator reads either.
+CREATE TABLE player_phase_form (
+    player_id        text NOT NULL REFERENCES players (id),
+    format           text NOT NULL,
+    phase            text NOT NULL,
+    role             text NOT NULL,
+    as_of            integer NOT NULL,
+    half_life        integer NOT NULL,
+    balls            double precision NOT NULL,
+    wickets          double precision NOT NULL,
+    dots             double precision NOT NULL,
+    ones             double precision NOT NULL,
+    twos             double precision NOT NULL,
+    threes           double precision NOT NULL,
+    fours            double precision NOT NULL,
+    sixes            double precision NOT NULL,
+    wide_balls       double precision,
+    noball_balls     double precision,
     exp_wickets      double precision,
     exp_dots         double precision,
     exp_ones         double precision,

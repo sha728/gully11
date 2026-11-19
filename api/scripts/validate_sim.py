@@ -1,7 +1,7 @@
 """Validate (and optionally calibrate) the simulator against real IPL matches.
 
-Replays completed, uninterrupted IPL matches with the real XIs, batting orders,
-bowlers and toss outcome (who batted first), K times each, and compares
+Replays completed, uninterrupted IPL matches with the real squads (batting order
+and bowlers chosen from pre-match information) and toss outcome, K times each, and compares
 simulated vs real:
 
 * first-innings total: mean, sd, p10/p50/p90       (plan target: mean within 5%)
@@ -13,8 +13,8 @@ Calibration (``--fit Y0 Y1``): fit per-phase outcome multipliers on the fit year
 so simulated outcome rates match reality, save them to sim/data/calibration.json,
 then validate on ``--years`` (use years outside the fit range for an honest test).
 
-Player profiles use career all-T20 phase stats from the pipeline's DuckDB file;
-careers include the matches being replayed (in-sample for the ratings).
+Ratings: ``--ratings form`` (default) rates players as of each season using only
+earlier data, recency-weighted (``--half-life``); ``career`` uses all data (in-sample).
 
     uv run python scripts/validate_sim.py --fit 2024 2025 --years 2026 2026
     uv run python scripts/validate_sim.py --years 2024 2026
@@ -78,17 +78,6 @@ def load_matches(con, y0: int, y1: int) -> list[dict]:
                count(*) FILTER (WHERE wides = 0 AND is_six) AS o6
         FROM d WHERE match_id IN (SELECT unnest(?)) GROUP BY ALL
     """, p)
-    order = q(con, """
-        SELECT match_id, batting_team AS team, pid, min(seq) AS first_seq FROM (
-            SELECT match_id, batting_team, batter_id AS pid, over * 100 + ball_in_over AS seq FROM d
-            UNION ALL
-            SELECT match_id, batting_team, non_striker_id, over * 100 + ball_in_over FROM d
-        ) WHERE match_id IN (SELECT unnest(?)) GROUP BY ALL
-    """, p)
-    bowled = q(con, """
-        SELECT match_id, bowling_team AS team, bowler_id AS pid, count(*) FILTER (WHERE is_legal) AS balls
-        FROM d WHERE match_id IN (SELECT unnest(?)) GROUP BY ALL
-    """, p)
     listed = q(con, "SELECT match_id, team, player_id AS pid FROM mp WHERE match_id IN (SELECT unnest(?))", p)
 
     by = defaultdict(dict)
@@ -97,15 +86,15 @@ def load_matches(con, y0: int, y1: int) -> list[dict]:
     outc = defaultdict(dict)
     for r in outcomes:
         outc[r["match_id"]][r["phase"]] = [r["w"], r["o0"], r["o1"], r["o2"], r["o3"], r["o4"], r["o6"]]
-    bat_order = defaultdict(list)
-    for r in sorted(order, key=lambda r: (r["match_id"], r["team"], r["first_seq"])):
-        bat_order[(r["match_id"], r["team"])].append(r["pid"])
-    bowlers = defaultdict(list)
-    for r in sorted(bowled, key=lambda r: -r["balls"]):
-        bowlers[(r["match_id"], r["team"])].append(r["pid"])
     squad = defaultdict(list)
     for r in listed:
         squad[(r["match_id"], r["team"])].append(r["pid"])
+    # Line-ups use pre-match information only. Deriving them from the scorecard
+    # (who batted, who bowled) leaks the result: a side that chased easily has few
+    # batters listed, so its tail would be promoted above its unused middle order.
+    bat_share = dict(con.execute(
+        "SELECT id, coalesce(bat_share, 0) FROM players WHERE id IN (SELECT unnest(?))",
+        [[r["pid"] for r in listed]]).fetchall())
 
     out = []
     for mt in matches:
@@ -114,46 +103,55 @@ def load_matches(con, y0: int, y1: int) -> list[dict]:
             continue
         teams = {}
         for team in (mt["team1"], mt["team2"]):
-            key = (mid, team)
-            order_ = bat_order[key]
-            rest = [p for p in bowlers[key] if p not in order_]
-            rest += [p for p in squad[key] if p not in order_ and p not in rest]
-            xi = (order_ + rest)[:11]
-            impact = [p for p in bowlers[key] if p not in xi]
-            teams[team] = {"xi": xi, "impact": impact, "bowlers": bowlers[key]}
+            ranked = sorted(dict.fromkeys(squad[(mid, team)]), key=lambda p: -bat_share.get(p, 0))
+            # 11 who bat, in order of career share of team balls faced; any extra
+            # listed players (IPL Impact Player) join as bowling-only options.
+            teams[team] = {"xi": ranked[:11], "impact": ranked[11:]}
         out.append({**mt, "inns": by[mid], "teams": teams, "outcomes": outc[mid],
                     "bat_first": by[mid][1]["batting_team"]})
     return out
 
 
-def load_profiles(con, ids: set[str], env, fmt: str = "T20") -> dict:
+def load_profiles(con, ids: set[str], env, fmt: str = "T20",
+                  as_of: int | None = None, half_life: int = 0) -> dict:
+    """Career ratings (player_phase_stats, all data) or, with ``as_of``, point-in-time
+    form ratings from player_phase_form: only data before ``as_of``, recency-weighted."""
     players = {r["id"]: r for r in q(con, "SELECT id, name, role FROM players WHERE id IN (SELECT unnest(?))",
                                      [list(ids)])}
     rows = defaultdict(list)
-    for r in q(con, "SELECT * FROM player_phase_stats WHERE format = ? AND player_id IN (SELECT unnest(?))",
-               [fmt, list(ids)]):
-        rows[r["player_id"]].append(r)
+    if as_of is None:
+        sql = "SELECT *, player_id AS pid FROM player_phase_stats WHERE format = ? AND player_id IN (SELECT unnest(?))"
+        params = [fmt, list(ids)]
+    else:
+        sql = ("SELECT * FROM player_phase_form WHERE format = ? AND pid IN (SELECT unnest(?)) "
+               "AND as_of = ? AND half_life = ?")
+        params = [fmt, list(ids), as_of, half_life]
+    for r in q(con, sql, params):
+        rows[r["pid"]].append(r)
     return {pid: from_phase_rows(players[pid], rows[pid], env) for pid in ids if pid in players}
+
+
+def season_year(mt: dict) -> int:
+    return int(str(mt["season"])[:4])
 
 
 def build_teams(mt: dict, prof: dict) -> dict[str, Team]:
     teams = {}
     for name, t in mt["teams"].items():
-        teams[name] = Team(name, [prof[p] for p in t["xi"]],
-                           impact=[prof[p] for p in t["impact"]],
-                           bowlers=t["bowlers"] if len(set(t["bowlers"])) >= 5 else None)
+        teams[name] = Team(name, [prof[p] for p in t["xi"]], impact=[prof[p] for p in t["impact"]])
     return teams
 
 
-def replay(matches: list[dict], prof: dict, env, runs: int) -> dict:
+def replay(matches: list[dict], profs: dict[int, dict], env, runs: int) -> dict:
     """Simulate every match ``runs`` times; return aggregates mirroring ``real_stats``."""
     s = defaultdict(list)
     s["outcomes"] = {p: [0] * 7 for p in PHASES}
     s["team"] = defaultdict(lambda: [0, 0])
     for mt in matches:
-        teams = build_teams(mt, prof)
+        teams = build_teams(mt, profs[season_year(mt)])
         first = mt["bat_first"]
         second = next(n for n in teams if n != first)
+        first_wins = 0.0
         for k in range(runs):
             seed = zlib.crc32(f"{mt['match_id']}:{k}".encode())
             r = simulate_match(teams[first], teams[second], env, seed, bat_first=0, commentary=False)
@@ -168,9 +166,11 @@ def replay(matches: list[dict], prof: dict, env, runs: int) -> dict:
                 for p in PHASES:
                     s["outcomes"][p] = [a + b for a, b in zip(s["outcomes"][p], inn.outcomes[p])]
             s["chase_won"].append(r.winner == second)
+            first_wins += 1.0 if r.winner == first else 0.5 if r.winner is None else 0.0
             for team in (first, second):
                 s["team"][(mt["season"], team)][1] += 1
                 s["team"][(mt["season"], team)][0] += r.winner == team
+        s["p_first"].append(first_wins / runs)
     return s
 
 
@@ -192,6 +192,7 @@ def real_stats(matches: list[dict]) -> dict:
         for p, v in mt["outcomes"].items():
             s["outcomes"][p] = [a + b for a, b in zip(s["outcomes"][p], v)]
         s["chase_won"].append(mt["winner"] == second)
+        s["first_won"].append(1.0 if mt["winner"] == first else 0.5 if mt["winner"] is None else 0.0)
         for team in (first, second):
             s["team"][(mt["season"], team)][1] += 1
             s["team"][(mt["season"], team)][0] += mt["winner"] == team
@@ -205,20 +206,20 @@ def rates(counts: dict[str, list[int]]) -> dict[str, list[float]]:
 CONDITION_GRID = (0.0, 0.06, 0.10, 0.14, 0.18, 0.22, 0.26)
 
 
-def fit(matches, prof, env, runs: int, iterations: int = 4) -> tuple[dict[str, tuple], float]:
+def fit(matches, profs, env, runs: int, iterations: int = 4) -> tuple[dict[str, tuple], float]:
     """1. pick the match-conditions spread whose first-innings sd best matches reality;
     2. multiplicative fixed point: scale each phase/outcome by real/sim rate."""
     real_all = real_stats(matches)
     real_sd = statistics.stdev(real_all["first"])
     best = min(CONDITION_GRID, key=lambda sd: abs(
-        statistics.stdev(replay(matches, prof, env.with_calibration(None, sd), runs)["first"]) - real_sd))
+        statistics.stdev(replay(matches, profs, env.with_calibration(None, sd), runs)["first"]) - real_sd))
     print(f"  conditions spread: {best} (real first-innings sd {real_sd:.1f})")
 
     real = rates(real_all["outcomes"])
     cal = {p: [1.0] * 7 for p in PHASES}
     main = (0, 1, 2, 5, 6)  # W, dot, 1, 4, 6: the outcomes with enough balls to judge
     for it in range(iterations):
-        sim = rates(replay(matches, prof, env.with_calibration(cal, best), runs)["outcomes"])
+        sim = rates(replay(matches, profs, env.with_calibration(cal, best), runs)["outcomes"])
         # damped update (power 0.7) so rare outcomes (2s, 3s) don't oscillate on noise
         cal = {p: [c * (r / s) ** 0.7 for c, r, s in zip(cal[p], real[p], sim[p])] for p in PHASES}
         worst = max(abs(real[p][i] / sim[p][i] - 1) for p in PHASES for i in main)
@@ -261,6 +262,12 @@ def report(real: dict, sim: dict, tolerance: float) -> bool:
         print(f"{label:28}{rv:10.3f}{sv:10.3f}{diff:+9.1%}  {mark}")
     print(f"team-season win%: real sd {statistics.pstdev(rw):.3f}, sim sd {statistics.pstdev(sw):.3f}, "
           f"correlation {corr:.2f} (n={len(keys)})")
+    # Match-level accuracy: Brier score of the simulated win chance vs the result.
+    # 0.25 = coin flip; lower is better. Clip to avoid 0/1 from finite runs.
+    ps = [min(max(p, 0.02), 0.98) for p in sim["p_first"]]
+    brier = statistics.mean((p - y) ** 2 for p, y in zip(ps, real["first_won"]))
+    hits = statistics.mean((p > 0.5) == (y == 1.0) for p, y in zip(ps, real["first_won"]) if p != 0.5)
+    print(f"match prediction: Brier {brier:.4f} (coin flip 0.2500), picks winner {hits:.1%}")
     return all(ok is not False for *_, ok in rows)
 
 
@@ -271,6 +278,9 @@ def main(argv=None) -> int:
     ap.add_argument("--runs", type=int, default=20)
     ap.add_argument("--env", default="IPL_recent")
     ap.add_argument("--tolerance", type=float, default=0.05)
+    ap.add_argument("--ratings", choices=["form", "career"], default="form",
+                    help="form: point-in-time, recency-weighted (no look-ahead); career: all data")
+    ap.add_argument("--half-life", type=int, default=4, help="years; 0 = no decay (form ratings)")
     args = ap.parse_args(argv)
 
     t0 = time.perf_counter()
@@ -285,24 +295,30 @@ def main(argv=None) -> int:
         test = load_matches(con, *args.years)
         fit_set = load_matches(con, *args.fit) if args.fit else []
         ids = {p for m in test + fit_set for t in m["teams"].values() for p in t["xi"] + t["impact"]}
-        prof = load_profiles(con, ids, env)
+        years = {season_year(m) for m in test + fit_set}
+        if args.ratings == "career":
+            career = load_profiles(con, ids, env)
+            profs = {y: career for y in years}
+        else:
+            profs = {y: load_profiles(con, ids, env, as_of=y, half_life=args.half_life) for y in years}
 
     if args.fit:
         print(f"Fitting calibration on {len(fit_set)} matches ({args.fit[0]}-{args.fit[1]})")
-        cal, cond_sd = fit(fit_set, prof, env, max(5, args.runs // 2))
+        cal, cond_sd = fit(fit_set, profs, env, max(5, args.runs // 2))
         data = json.loads(CALIBRATION_PATH.read_text()) if CALIBRATION_PATH.exists() else {}
-        data[args.env] = {"fit_years": args.fit, "matches": len(fit_set),
-                          "conditions_sd": cond_sd, "multipliers": cal}
+        data[args.env] = {"fit_years": args.fit, "matches": len(fit_set), "ratings": args.ratings,
+                          "half_life": args.half_life, "conditions_sd": cond_sd, "multipliers": cal}
         CALIBRATION_PATH.write_text(json.dumps(data, indent=1))
         env = env.with_calibration(cal, cond_sd)
         print(f"  saved -> {CALIBRATION_PATH}")
 
     real = real_stats(test)
-    sim = replay(test, prof, env, args.runs)
+    sim = replay(test, profs, env, args.runs)
     calibrated = any(v != (1.0,) * 7 for v in env.calibration.values())
     print(f"\nValidation on {len(test)} real matches {args.years[0]}-{args.years[1]}, "
           f"{len(test) * args.runs:,} simulated, env={args.env}, "
-          f"{'calibrated' if calibrated else 'uncalibrated'}, {time.perf_counter() - t0:.0f}s")
+          f"{'calibrated' if calibrated else 'uncalibrated'}, ratings={args.ratings}"
+          f"{f' (half-life {args.half_life}y)' if args.ratings == 'form' else ''}, {time.perf_counter() - t0:.0f}s")
     return 0 if report(real, sim, args.tolerance) else 1
 
 

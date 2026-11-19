@@ -235,6 +235,90 @@ SELECT 'bowl', pid, format, phase,
 FROM pw JOIN ctx_bowl c USING (format, ctx, yr, phase) WHERE c.balls > 0 GROUP BY ALL;
 """
 
+# --------------------------------------------------------------- recent form
+# Recency-weighted phase stats for the simulator. Each year of data before
+# ``as_of`` is weighted 0.5 ** ((as_of - 1 - year) / half_life), so the last
+# completed year counts fully; half_life 0 means no decay (career).
+# Several (as_of, half_life) combinations are built so validation can rate
+# players "as of" each season using only earlier data (no look-ahead).
+FORM_HALF_LIVES = (0, 1, 2, 4)
+DEFAULT_HALF_LIFE = 4
+FORM_FIRST_AS_OF = 2024
+
+FORM_BASE_SQL = f"""
+CREATE OR REPLACE TEMP TABLE pc_bat AS
+WITH faced AS (
+    SELECT batter_id AS pid, format, ctx, yr, phase,
+           count(*) FILTER (WHERE wides = 0) AS balls,
+           count(*) FILTER (WHERE wides = 0 AND runs_batter = 0) AS dots,
+           count(*) FILTER (WHERE wides = 0 AND runs_batter = 1) AS ones,
+           count(*) FILTER (WHERE wides = 0 AND runs_batter = 2) AS twos,
+           count(*) FILTER (WHERE wides = 0 AND runs_batter = 3) AS threes,
+           count(*) FILTER (WHERE is_four) AS fours,
+           count(*) FILTER (WHERE is_six) AS sixes
+    FROM fdc WHERE batter_id IS NOT NULL GROUP BY ALL
+),
+outs AS (
+    SELECT player_out_id AS pid, format, ctx, yr, phase, count(*) AS wickets
+    FROM fdc WHERE is_wicket AND wicket_kind NOT IN {NOT_OUT_KINDS} GROUP BY ALL
+)
+SELECT f.*, coalesce(o.wickets, 0) AS wickets
+FROM faced f LEFT JOIN outs o USING (pid, format, ctx, yr, phase);
+
+CREATE OR REPLACE TEMP TABLE pc_bowl AS
+SELECT bowler_id AS pid, format, ctx, yr, phase,
+       count(*) FILTER (WHERE is_legal) AS balls,
+       count(*) FILTER (WHERE bowler_credited) AS wickets,
+       count(*) FILTER (WHERE is_legal AND runs_batter + wides + noballs = 0) AS dots,
+       count(*) FILTER (WHERE is_legal AND runs_batter = 1) AS ones,
+       count(*) FILTER (WHERE is_legal AND runs_batter = 2) AS twos,
+       count(*) FILTER (WHERE is_legal AND runs_batter = 3) AS threes,
+       count(*) FILTER (WHERE is_legal AND is_four) AS fours,
+       count(*) FILTER (WHERE is_legal AND is_six) AS sixes,
+       count(*) FILTER (WHERE wides > 0) AS wide_balls,
+       count(*) FILTER (WHERE noballs > 0) AS noball_balls
+FROM fdc WHERE bowler_id IS NOT NULL GROUP BY ALL;
+"""
+
+_FORM_CATS = ["wickets", "dots", "ones", "twos", "threes", "fours", "sixes"]
+
+
+def form_sql(grid: list[tuple[int, int]]) -> str:
+    values = ", ".join(f"({a}, {h})" for a, h in grid)
+    weight = ("CASE WHEN g.half_life = 0 THEN 1.0 "
+              "ELSE pow(0.5, (g.as_of - 1 - p.yr) / g.half_life) END")
+
+    def side(role: str, table: str, ctx: str, extra: list[str]) -> str:
+        obs = ", ".join(f"sum(w * {c}) AS {c}" for c in _FORM_CATS + extra)
+        exp = ", ".join(f"sum(w * balls * c_{c} / c_balls) AS exp_{c}" for c in _FORM_CATS + extra)
+        null_extra = "" if extra else ", NULL::DOUBLE AS wide_balls, NULL::DOUBLE AS noball_balls"
+        null_exp = "" if extra else ", NULL::DOUBLE AS exp_wide_balls, NULL::DOUBLE AS exp_noball_balls"
+        cols = ", ".join(f"p.{c}" for c in _FORM_CATS + extra)
+        ccols = ", ".join(f"c.{c} AS c_{c}" for c in _FORM_CATS + extra)
+        return f"""
+        SELECT as_of, half_life, '{role}' AS role, pid, format, phase,
+               sum(w * balls) AS balls, {obs}{null_extra}, {exp}{null_exp}
+        FROM (
+            SELECT g.as_of, g.half_life, p.pid, p.format, p.phase, p.balls, {cols},
+                   c.balls AS c_balls, {ccols}, {weight} AS w
+            FROM {table} p
+            JOIN {ctx} c USING (format, ctx, yr, phase)
+            CROSS JOIN grid g
+            WHERE p.yr < g.as_of AND c.balls > 0
+        ) GROUP BY ALL"""
+
+    return f"""
+CREATE OR REPLACE TABLE player_phase_form AS
+WITH grid AS (SELECT * FROM (VALUES {values}) g(as_of, half_life))
+SELECT * FROM (
+    {side('bat', 'pc_bat', 'ctx_bat', [])}
+    UNION ALL BY NAME
+    {side('bowl', 'pc_bowl', 'ctx_bowl', ['wide_balls', 'noball_balls'])}
+) WHERE balls > 0
+ORDER BY as_of, half_life, pid, format, phase, role;
+"""
+
+
 EXP_COLS = ["exp_wickets", "exp_dots", "exp_ones", "exp_twos", "exp_threes", "exp_fours",
             "exp_sixes", "exp_wide_balls", "exp_noball_balls"]
 
@@ -418,6 +502,11 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         con.execute(stats_sql("player_season_stats", ["format", "season"]))
         con.execute(CONTEXT_SQL)
         con.execute(PHASE_SQL)
+        con.execute(FORM_BASE_SQL)
+        last_year = con.execute("SELECT max(yr) FROM fdc").fetchone()[0]
+        as_ofs = sorted({min(FORM_FIRST_AS_OF, last_year + 1), *range(FORM_FIRST_AS_OF, last_year + 2)})
+        con.execute(form_sql([(a, h) for a in as_ofs for h in FORM_HALF_LIVES]))
         con.execute(PLAYERS_SQL)
-        tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats"]
+        tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats",
+                  "player_phase_form"]
         return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}

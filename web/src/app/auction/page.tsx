@@ -18,7 +18,7 @@ export default function AuctionPage() {
   return (
     <div className="space-y-14">
       <PageHeader
-        kicker="IPL Auction · mega auction rules"
+        kicker="IPL Auction · mega auction or the real 2026 auction"
         title={<>Build a squad. <span className="text-signal">Outbid the room.</span></>}
         sub="Every player who has played the IPL in the last three seasons goes under the hammer, priced from their recent T20 form. Play with friends using a room code, or against AI franchises that bid by need and budget."
       />
@@ -42,6 +42,10 @@ export default function AuctionPage() {
         </Section>
       </div>
 
+      <p className="max-w-2xl font-mono text-[11px] leading-relaxed text-muted-foreground">
+        IPL 2026 replay: squads, purses, sets and results from Wikipedia&apos;s record of the 16 December 2025 auction
+        (CC BY-SA 4.0). Purses are ₹125 cr minus the retained salaries listed there.
+      </p>
       <p className="max-w-2xl font-mono text-[11px] leading-relaxed text-muted-foreground">
         Fair prices are a stats estimate, not real auction history: recent T20 form, scored against others in the same role,
         plus IPL and international experience, scaled to the money in the room. Bots bid up to what a player is worth to them:

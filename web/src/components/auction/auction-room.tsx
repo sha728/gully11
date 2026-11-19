@@ -79,7 +79,7 @@ function Lobby({ s, send, error, onJoin }: { s: RoomState; send: (m: object) => 
   return (
     <div className="space-y-10">
       <div>
-        <div className="label mb-2">Mega auction · {s.franchises.length} franchises · {s.total} players · {s.speed} clock</div>
+        <div className="label mb-2">{s.mode_name} · {s.franchises.length} franchises · {s.total} players · {s.speed} clock</div>
         <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">
           Room <span className="font-mono tracking-[0.15em] text-signal">{s.code}</span>
         </h1>
@@ -100,6 +100,11 @@ function Lobby({ s, send, error, onJoin }: { s: RoomState; send: (m: object) => 
                 <li key={f.id} className={cn("flex items-center gap-3 py-2.5", mine && "bg-signal/10")}>
                   <TeamTag id={f.id} />
                   <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                  {s.mode === "mini" && (
+                    <span className="hidden font-mono text-[11px] text-muted-foreground tnum sm:inline" title="Purse left after retentions · retained players · overseas">
+                      {money(f.purse)} · {f.size} kept · {f.overseas} OS
+                    </span>
+                  )}
                   <span className={cn("flex items-center gap-1.5 font-mono text-xs", mine ? "text-signal" : "text-muted-foreground")}>
                     {f.owner ? <><UserIcon />{f.owner}{mine ? " (you)" : ""}</> : f.bot ? <><RobotIcon />bot</> : "open seat"}
                   </span>
@@ -224,7 +229,10 @@ function Live({ s, send, error, serverNow }: { s: RoomState; send: (m: object) =
                 <Stat k="Econ" v={p.form.econ ?? "–"} />
                 <Stat k="IPL games" v={p.ipl_matches ?? 0} />
               </dl>
-              <div className="mt-1 font-mono text-[10px] opacity-50">All T20s since 2024</div>
+              <div className="mt-1 font-mono text-[10px] opacity-50">
+                {p.record === false ? "No ball-by-ball record: an uncapped domestic player" : "All T20s since 2024"}
+                {p.overseas && s.rules.overseas_fee_cap ? ` · fee capped at ${money(s.rules.overseas_fee_cap)} (bids can go higher)` : ""}
+              </div>
             </div>
             <div className="flex flex-col bg-[oklch(0.17_0.01_150)] p-5">
               <div className="flex justify-between font-mono text-[10px] tracking-widest uppercase opacity-70">
@@ -367,7 +375,7 @@ function MySquad({ s, me }: { s: RoomState; me: FranchiseView }) {
               {group.map((x) => (
                 <li key={x.id} className="flex justify-between gap-2 py-1">
                   <span className="truncate">{x.p.name}{x.p.overseas ? <span className="ml-1 font-mono text-[9px] text-signal">OS</span> : null}</span>
-                  <span className="font-mono tnum">{money(x.price)}</span>
+                  <span className="font-mono tnum">{x.retained ? <span className="mr-1 text-[9px] text-muted-foreground uppercase">kept</span> : null}{money(x.paid ?? x.price)}</span>
                 </li>
               ))}
             </ul>
@@ -417,6 +425,8 @@ function Ended({ code, summary, you, min = 18 }: { code: string; summary: Summar
         <p className="mt-2 font-mono text-xs text-muted-foreground">Next milestone: every squad plays a simulated season on the match engine.</p>
       </div>
 
+      {summary.reality && <Reality rows={summary.reality} you={you} />}
+
       {summary.best_value.length > 0 && (
         <section className="space-y-2">
           <div className="label">Best value buys (fair price minus what was paid)</div>
@@ -440,6 +450,47 @@ function Ended({ code, summary, you, min = 18 }: { code: string; summary: Summar
   );
 }
 
+function Reality({ rows, you }: { rows: NonNullable<Summary["reality"]>; you: string | null }) {
+  const [onlyMine, setOnlyMine] = useState(false);
+  const shown = rows.filter((r) => !onlyMine || r.team === you || r.real_team === you);
+  const same = rows.filter((r) => r.team === r.real_team).length;
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <div className="label">What really happened · Abu Dhabi, 16 December 2025</div>
+          <p className="mt-1 text-sm text-muted-foreground">{same} of {rows.length} players went to the same franchise as in the real auction.</p>
+        </div>
+        {you && (
+          <Button variant="outline" size="sm" onClick={() => setOnlyMine((v) => !v)} className="font-mono text-[11px] uppercase">
+            {onlyMine ? "Show all" : `Only ${you}`}
+          </Button>
+        )}
+      </div>
+      <div className="overflow-x-auto border-y">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="font-mono text-[10px] text-muted-foreground uppercase">
+              <th className="py-1.5 text-left font-normal">Player</th>
+              <th className="text-right font-normal">This room</th>
+              <th className="text-right font-normal">Real</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y font-mono tnum">
+            {shown.map((r) => (
+              <tr key={r.player} className={cn((r.team === you || r.real_team === you) && "bg-signal/5")}>
+                <td className="py-1.5 font-sans">{r.name}</td>
+                <td className={cn("text-right", r.team === you && "text-signal")}>{r.team ? `${r.team} · ${money(r.price)}` : "unsold"}</td>
+                <td className={cn("text-right", r.team === r.real_team && "font-semibold")}>{r.real_team} · {money(r.real_price)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function SquadCard({ f, you }: { f: Summary["franchises"][number]; you: boolean }) {
   return (
     <section className={cn("space-y-3 bg-card p-4", you && "ring-2 ring-signal ring-inset")}>
@@ -459,7 +510,7 @@ function SquadCard({ f, you }: { f: Summary["franchises"][number]; you: boolean 
             <ul className="text-xs">
               {group.map((x) => (
                 <li key={x.id} className="flex justify-between gap-2 py-0.5">
-                  <span className="truncate">{x.player.name}{x.player.overseas ? <span className="ml-1 font-mono text-[9px] text-signal">OS</span> : null}</span>
+                  <span className="truncate">{x.player.name}{x.player.overseas ? <span className="ml-1 font-mono text-[9px] text-signal">OS</span> : null}{x.retained ? <span className="ml-1 font-mono text-[9px] text-muted-foreground uppercase">kept</span> : null}</span>
                   <span className="font-mono tnum">{money(x.price)}</span>
                 </li>
               ))}

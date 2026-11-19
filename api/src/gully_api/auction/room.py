@@ -58,10 +58,11 @@ class Franchise:
     name: str
     bot: bool
     purse: int
+    start_purse: int = 0                 # purse going into the auction (after retentions in mini mode)
     personality: str = "balanced"
     owner: str | None = None             # nickname of the human who claimed it
     token: str | None = None             # secret the human's client holds
-    squad: list[dict] = field(default_factory=list)   # {"id", "price"}
+    squad: list[dict] = field(default_factory=list)   # {"id", "price", "retained"?}
 
     def count(self, pool: dict, role: str | None = None, overseas: bool | None = None) -> int:
         return sum(1 for s in self.squad
@@ -83,30 +84,44 @@ class Lot:
 
 class Room:
     def __init__(self, code: str, mode: str, rules: dict, pool: list[dict], teams: int, humans: int,
-                 speed: str = "normal", seed: int | None = None, host: str = "Host"):
+                 speed: str = "normal", seed: int | None = None, host: str = "Host",
+                 replay: dict | None = None):
+        """``replay`` (mini mode, from ``mini.build_mini``): fixed lots in real order,
+        all ten franchises with their retained squads and purses, and the real
+        outcomes, which stay hidden until the summary."""
+        if replay:
+            teams = len(FRANCHISES)
         if not 2 <= teams <= len(FRANCHISES):
             raise AuctionError(f"Between 2 and {len(FRANCHISES)} franchises.")
         if not 1 <= humans <= teams:
             raise AuctionError("At least one franchise has to be yours.")
         self.code, self.mode, self.rules, self.speed = code, mode, rules, speed
         self.rng = random.Random(seed)
-        self.pool = {p["id"]: p for p in pool}
-        # Sets in order; players shuffled within each set, as at the real auction.
-        self.sets: list[tuple[str, list[str]]] = []
-        for set_code, players in make_sets(pool, rules):
-            ids = [p["id"] for p in players]
-            self.rng.shuffle(ids)
-            self.sets.append((set_code, ids))
-        self.queue: list[tuple[str, str]] = [(c, pid) for c, ids in self.sets for pid in ids]
+        self.real: dict[str, dict] = {}
+        if replay:
+            pool = [e for _, e in replay["lots"]]
+            self.pool = {p["id"]: p for p in pool} | replay["players"]
+            self.queue: list[tuple[str, str]] = [(c, e["id"]) for c, e in replay["lots"]]
+            self.real = replay["real"]
+        else:
+            self.pool = {p["id"]: p for p in pool}
+            # Sets in order; players shuffled within each set, as at the real auction.
+            self.queue = []
+            for set_code, players in make_sets(pool, rules):
+                ids = [p["id"] for p in players]
+                self.rng.shuffle(ids)
+                self.queue += [(set_code, pid) for pid in ids]
         self.fair_total = sum(p["fair"] for p in pool) or 1
         self.fair_seen = 0                   # fair value of the lots shown so far (bots pace spending on it)
         self.total_lots = len(self.queue)
-        picks = self.rng.sample(FRANCHISES, teams)
+        picks = FRANCHISES if replay else self.rng.sample(FRANCHISES, teams)
         kinds = list(PERSONALITIES)
         self.franchises: dict[str, Franchise] = {}
         for i, (fid, name) in enumerate(picks):
-            self.franchises[fid] = Franchise(fid, name, bot=i >= humans, purse=rules["purse_lakh"],
-                                             personality=self.rng.choice(kinds))
+            purse = replay["purse"][fid] if replay else rules["purse_lakh"]
+            self.franchises[fid] = Franchise(fid, name, bot=i >= humans, purse=purse, start_purse=purse,
+                                             personality=self.rng.choice(kinds),
+                                             squad=[dict(s) for s in replay["squads"][fid]] if replay else [])
         self.phase = "lobby"
         self.lot: Lot | None = None
         self.accelerated = False
@@ -192,6 +207,13 @@ class Room:
             again = sorted(self.unsold, key=lambda pid: -self.pool[pid]["fair"])
             self.unsold = []
             self.queue = [("ACC", pid) for pid in again]
+        if self.queue[0][0] == "ACC" and not self.accelerated:
+            # The real auction's accelerated round (mini mode): players unsold so far
+            # come back at the end of it.
+            self.accelerated = True
+            self.main_presented = self.presented
+            self.queue += [("ACC", pid) for pid in self.unsold]
+            self.unsold = []
         set_code, pid = self.queue.pop(0)
         self.presented += 1
         if not self.accelerated:
@@ -233,10 +255,16 @@ class Room:
             return f"You already have {r['overseas_max']} overseas players."
         still_needed = max(0, r["squad_min"] - len(f.squad) - 1)
         reserve = still_needed * min(r["base_prices"])
-        if amount > f.purse - reserve:
+        if self.charge(lot.player, amount) > f.purse - reserve:
             return (f"Not enough purse: you need to keep ₹{reserve / 100:g} cr to fill your squad."
                     if reserve else "Not enough purse.")
         return None
+
+    def charge(self, pid: str, price: int) -> int:
+        """What the franchise pays: an overseas player's fee is capped in mini mode
+        (bids can go higher; the team doesn't pay the excess)."""
+        cap = self.rules.get("overseas_fee_cap")
+        return min(price, cap) if cap and self.pool[pid]["overseas"] else price
 
     def bid(self, fid: str, amount: int, now: float) -> None:
         lot = self._open_lot()
@@ -311,7 +339,7 @@ class Room:
         seen = self.fair_seen / self.fair_total
         if seen < 0.15:
             return 1.0
-        spent = 1 - f.purse / self.rules["purse_lakh"]
+        spent = 1 - f.purse / max(1, f.start_purse)
         return min(max((seen + 0.05) / (spent + 0.05), 1.0), 1.8) ** 0.7
 
     def lots_left(self) -> int:
@@ -384,8 +412,9 @@ class Room:
         p = self.pool[lot.player]
         if lot.leader:
             f = self.franchises[lot.leader]
-            f.purse -= lot.price
-            f.squad.append({"id": lot.player, "price": lot.price})
+            paid = self.charge(lot.player, lot.price)
+            f.purse -= paid
+            f.squad.append({"id": lot.player, "price": lot.price, **({"paid": paid} if paid != lot.price else {})})
             self.log.append({"player": lot.player, "name": p["name"], "result": "sold", "franchise": f.id,
                              "price": lot.price, "fair": p["fair"], "bids": len(lot.bids)})
         else:
@@ -400,16 +429,18 @@ class Room:
         lot = self.lot
         upcoming = [pid for _, pid in self.queue[:6]]
         out = {
-            "code": self.code, "mode": self.mode, "phase": self.phase, "speed": self.speed,
+            "code": self.code, "mode": self.mode, "mode_name": self.rules.get("name", self.mode),
+            "phase": self.phase, "speed": self.speed,
             "version": self.version, "accelerated": self.accelerated,
             "presented": self.presented, "total": self.total_lots,
             # Position within the current round: main pass, or the accelerated round.
             "round": ({"n": self.presented - self.main_presented, "of": self.presented - self.main_presented + len(self.queue)}
                       if self.accelerated else {"n": self.presented, "of": self.total_lots}),
-            "rules": {k: self.rules[k] for k in ("purse_lakh", "squad_min", "squad_max", "overseas_max", "increments")},
+            "rules": {k: self.rules.get(k) for k in ("purse_lakh", "squad_min", "squad_max", "overseas_max",
+                                                      "increments", "overseas_fee_cap")},
             "franchises": [{
                 "id": f.id, "name": f.name, "bot": f.bot, "owner": f.owner,
-                "purse": f.purse, "squad": f.squad, "size": len(f.squad),
+                "purse": f.purse, "start_purse": f.start_purse, "squad": f.squad, "size": len(f.squad),
                 "overseas": f.count(self.pool, overseas=True),
                 "roles": {r: f.count(self.pool, role=r) for r in SQUAD_PLAN},
             } for f in self.franchises.values()],
@@ -431,9 +462,9 @@ class Room:
         """The finished auction: squads, spend and the best value buys."""
         sold = [e for e in self.log if e["result"] == "sold"]
         value = sorted(sold, key=lambda e: e["fair"] - e["price"], reverse=True)[:5]
-        return {
+        out = {
             "franchises": [{"id": f.id, "name": f.name, "bot": f.bot, "owner": f.owner,
-                            "spent": self.rules["purse_lakh"] - f.purse, "purse": f.purse,
+                            "spent": f.start_purse - f.purse, "purse": f.purse,
                             "squad": [{**s, "player": self.pool[s["id"]]} for s in f.squad]}
                            for f in self.franchises.values()],
             "sold": len(sold),
@@ -441,6 +472,18 @@ class Room:
             "unsold": len({e["player"] for e in self.log if e["result"] == "unsold"} - {e["player"] for e in sold}),
             "best_value": value,
         }
+        if self.real:
+            # Mini mode: every lot next to what really happened in Abu Dhabi.
+            final = {}
+            for e in self.log:
+                final[e["player"]] = e
+            out["reality"] = [{
+                "player": pid, "name": self.pool[pid]["name"],
+                "real_team": real["team"], "real_price": real["price"],
+                "team": final[pid].get("franchise") if pid in final else None,
+                "price": final[pid].get("price") if pid in final else None,
+            } for pid, real in self.real.items()]
+        return out
 
 
 def room_code() -> str:

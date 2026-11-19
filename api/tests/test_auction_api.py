@@ -105,3 +105,22 @@ def test_bot_auction_on_the_real_pool_looks_like_a_market(client):
     assert statistics.median(marquee) <= 1.25 * TOP_PRICE
     spent = [RULES["mega"]["purse_lakh"] - f.purse for f in r.franchises.values() if f.bot]
     assert min(spent) >= 0.6 * RULES["mega"]["purse_lakh"]
+
+
+def test_mini_room_replays_the_2026_auction(client):
+    from gully_api import db
+    from gully_api.auction.mini import build_mini
+    with db._pool.connection() as conn:
+        m = build_mini(conn)
+    assert len(m["lots"]) == 77 and m["lots"][0][0] == "BA1" and m["lots"][-1][0] == "ACC"
+    assert sum(len(s) for s in m["squads"].values()) == 173
+    assert m["purse"]["MI"] == 275 and m["purse"]["KKR"] > 6000       # MI had ₹2.75 cr left
+    everyone = [e for _, e in m["lots"]] + list(m["players"].values())
+    assert not any((e["last_ipl"] or "") >= "2025/26" for e in everyone)   # nothing from after the auction
+    green = next(e for _, e in m["lots"] if e["name"] == "Cameron Green")
+    assert green["overseas"] and m["real"][green["id"]] == {"team": "KKR", "price": 2520}
+    r = client.post(f"{A}/rooms", json={"nickname": "Me", "mode": "mini", "teams": 3, "humans": 1})
+    assert r.status_code == 200, r.text
+    state = client.get(f"{A}/rooms/{r.json()['code']}").json()
+    assert len(state["franchises"]) == 10 and state["mode_name"] == "IPL 2026 auction"
+    assert "2520" not in str(state)                                    # no spoilers

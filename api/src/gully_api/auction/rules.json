@@ -1,20 +1,108 @@
 {
-  "_comment": "Auction rules per mode: never hard-coded. Money in lakh (100 lakh = 1 crore). Sources: IPL Player Regulations 2025-27 (purse, squad, overseas) and the published increment slabs (5 lakh up to 1 cr, 10 to 2 cr, 20 to 5 cr, 25 above).",
+  "_comment": "Auction rules per mode: never hard-coded. Money in lakh (100 lakh = 1 crore). Sources: IPL Player Regulations 2025-27 (purse, squad, overseas) and the published increment slabs (5 lakh up to 1 cr, 10 to 2 cr, 20 to 5 cr, 25 above). Mini (IPL 2026 auction): Rs 125 cr cap, overseas fee capped at Rs 18 cr (bids can go higher; the excess isn't paid by the team).",
   "mega": {
     "name": "Mega auction",
     "purse_lakh": 12000,
     "squad_min": 18,
     "squad_max": 25,
     "overseas_max": 8,
-    "increments": [[100, 5], [200, 10], [500, 20], [null, 25]],
-    "base_prices": [30, 50, 75, 100, 125, 150, 200],
+    "increments": [
+      [
+        100,
+        5
+      ],
+      [
+        200,
+        10
+      ],
+      [
+        500,
+        20
+      ],
+      [
+        null,
+        25
+      ]
+    ],
+    "base_prices": [
+      30,
+      50,
+      75,
+      100,
+      125,
+      150,
+      200
+    ],
     "uncapped_max_base": 50,
     "capped_min_base": 75,
     "marquee": 12,
     "set_size": 8,
     "timers": {
-      "normal": {"open": 15, "bid": 10, "accelerated_open": 8, "accelerated_bid": 6},
-      "fast": {"open": 8, "bid": 5, "accelerated_open": 5, "accelerated_bid": 4}
+      "normal": {
+        "open": 15,
+        "bid": 10,
+        "accelerated_open": 8,
+        "accelerated_bid": 6
+      },
+      "fast": {
+        "open": 8,
+        "bid": 5,
+        "accelerated_open": 5,
+        "accelerated_bid": 4
+      }
+    }
+  },
+  "mini": {
+    "name": "IPL 2026 auction",
+    "purse_lakh": 12500,
+    "squad_min": 18,
+    "squad_max": 25,
+    "overseas_max": 8,
+    "overseas_fee_cap": 1800,
+    "increments": [
+      [
+        100,
+        5
+      ],
+      [
+        200,
+        10
+      ],
+      [
+        500,
+        20
+      ],
+      [
+        null,
+        25
+      ]
+    ],
+    "base_prices": [
+      30,
+      50,
+      75,
+      100,
+      125,
+      150,
+      200
+    ],
+    "uncapped_max_base": 50,
+    "capped_min_base": 75,
+    "marquee": 0,
+    "set_size": 8,
+    "timers": {
+      "normal": {
+        "open": 15,
+        "bid": 10,
+        "accelerated_open": 8,
+        "accelerated_bid": 6
+      },
+      "fast": {
+        "open": 8,
+        "bid": 5,
+        "accelerated_open": 5,
+        "accelerated_bid": 4
+      }
     }
   }
 }

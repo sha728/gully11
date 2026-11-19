@@ -1,8 +1,8 @@
 # Auction (Milestone 5, first cut)
 
-Mega-auction rooms with live bidding over a WebSocket, AI franchises, and a player
-pool built from our own data. Mini mode (the real IPL 2026 auction from Wikipedia,
-with retained squads) is the next PR; the season simulation is Milestone 6.
+Auction rooms with live bidding over a WebSocket and AI franchises, in two modes:
+mega (a player pool built from our own data) and mini (a replay of the real IPL
+2026 auction). The season simulation is Milestone 6.
 
 ## Rules (`api/src/gully_api/auction/rules.json`)
 
@@ -49,3 +49,27 @@ uncapped → accelerated round (unsold players again, shorter clock) → summary
 
 Rooms live in the API process (a restart ends them); finished auctions are saved to
 `auction_rooms`. Several API processes would need the room state in Redis.
+
+## Mini mode: the IPL 2026 auction (`mini.py`)
+
+`gully-pipeline auction2026` reads "List of 2026 Indian Premier League personnel
+changes" on Wikipedia (CC BY-SA 4.0) into `api/src/gully_api/auction/data/`:
+`ipl2026_retained.csv` (173 retained players with salaries) and
+`ipl2026_auction.csv` (the 77 players sold on 16 December 2025, by registration
+number, with set, base price, buyer and price). Each row carries the page revision.
+Players are matched to our ids by Wikipedia article, then full name and country,
+then a close spelling or Cricsheet initials when exactly one player fits: 170 of
+173 retained and 63 of 77 sold; the rest are uncapped domestic players with no
+ball-by-ball record.
+
+- All ten franchises, with their retained squads; purse = ₹125 cr minus the retained
+  salaries listed on Wikipedia (MI ₹2.75 cr ... KKR ₹70.3 cr). These may differ by a
+  few crore from figures reported elsewhere; the page lists no purses itself.
+- Lots in real order and sets, at real base prices; the accelerated round as it
+  happened, with players unsold earlier added at its end.
+- Overseas fee cap ₹18 cr: bidding can go past it, the team pays at most the cap.
+- Stats, career numbers and "last IPL team" stop before the 2025/26 season, so the
+  replay shows nothing from after the auction.
+- Where each player really went, and for how much, stays on the server until the
+  end, then appears next to the room's result. Only players who were sold are on
+  Wikipedia, so the unsold ones from the real auction aren't in the replay.

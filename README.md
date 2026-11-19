@@ -1,5 +1,7 @@
 # Gully11
 
+[![CI](https://github.com/sha728/gully11/actions/workflows/ci.yml/badge.svg)](https://github.com/sha728/gully11/actions/workflows/ci.yml)
+
 Cricket fan web app: player stats, an all-time XI builder with simulated series, and a real-time IPL-rules auction — all running off one player database and one match simulator. Full plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## Layout
@@ -43,6 +45,18 @@ uv run python scripts/validate_sim.py --fit 2024 2025 --years 2026 2026   # simu
 cd ../web
 npm run dev                                      # http://localhost:3000: search, player, compare, venue pages
 ```
+
+## CI
+
+- **CI** (`.github/workflows/ci.yml`, every PR and push to `main`): pipeline tests, API +
+  simulator tests (database tests skip), web type check, lint and production build. No
+  data downloads, so it stays fast.
+- **Integration** (`.github/workflows/integration.yml`, weekly and on demand): downloads
+  fresh Cricsheet data, runs the whole pipeline into a Postgres service, then the API
+  tests with `REQUIRE_DB=1` (missing data fails instead of skipping) and an informational
+  simulator check against the latest IPL season.
+
+Work happens on feature branches merged into `main` through pull requests.
 
 ## Data credits
 

@@ -1,5 +1,6 @@
 """Integration tests: need Postgres up (docker compose) and `gully-pipeline load` run."""
 
+import os
 import time
 
 import psycopg
@@ -18,6 +19,10 @@ def _db_loaded() -> bool:
         return False
 
 
+# Locally these skip without a loaded database; the integration workflow sets
+# REQUIRE_DB=1 so a missing database fails loudly instead of skipping silently.
+if os.environ.get("REQUIRE_DB") and not _db_loaded():
+    raise RuntimeError("REQUIRE_DB is set but Postgres is not reachable or not loaded")
 pytestmark = pytest.mark.skipif(not _db_loaded(), reason="Postgres not running or not loaded")
 
 

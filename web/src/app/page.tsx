@@ -4,6 +4,10 @@ import { Section } from "@/components/blocks";
 import { SearchTrigger } from "@/components/search-palette";
 import { api, displayName, fmt, type PlayerSummary, type SearchResult, type VenueSummary } from "@/lib/api";
 
+// Render on request rather than at build time, so building (CI, deploys) never needs
+// a live API. API responses are still cached for an hour in production (lib/api.ts).
+export const dynamic = "force-dynamic";
+
 // A few fixed starting points; ids are Cricsheet register ids.
 const QUICK = [
   { href: "/players/ba607b88", label: "Virat Kohli" },

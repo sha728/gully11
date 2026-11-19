@@ -9,6 +9,7 @@ shareable challenges and the daily challenge work.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import random
 import zlib
@@ -16,6 +17,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from ..settings import settings
 from ..sim import Profile, Team, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
 
 FULL_MEMBERS = ["India", "Australia", "England", "South Africa", "New Zealand", "Pakistan",
@@ -221,7 +223,11 @@ def viable_combos(conn, fmt: str) -> list[tuple[str, str]]:
 # ------------------------------------------------------------------ spins
 
 def _rng(*parts) -> random.Random:
-    return random.Random(zlib.crc32(":".join(map(str, parts)).encode()))
+    """Spin RNG keyed with a server secret: the seed in a share link names a draw,
+    but without the secret nobody can work out its spins from the (open) code."""
+    key = settings.xi_secret.encode()
+    digest = hmac.new(key, ":".join(map(str, parts)).encode(), hashlib.sha256).digest()
+    return random.Random(int.from_bytes(digest, "big"))
 
 
 def _fills(c: dict) -> set[int]:
@@ -248,9 +254,23 @@ def _feasible(lists: list[list[dict]]) -> bool:
     return all(place(i, set()) for i in range(len(lists)))
 
 
+_SPIN_CACHE: dict[tuple[str, int], list[dict]] = {}
+SPIN_CACHE_SIZE = 512
+
+
 def spins(conn, fmt: str, seed: int) -> list[dict]:
-    """Eleven seeded spins, each an (era, side) with its candidate list. Re-draws
-    deterministically until the draft rules can be met."""
+    """Eleven seeded spins, each an (era, side) with its candidate list (cached:
+    every pick and move in a draft re-checks against them)."""
+    key = (fmt, seed)
+    if key not in _SPIN_CACHE:
+        if len(_SPIN_CACHE) >= SPIN_CACHE_SIZE:
+            _SPIN_CACHE.pop(next(iter(_SPIN_CACHE)))
+        _SPIN_CACHE[key] = _draw(conn, fmt, seed)
+    return _SPIN_CACHE[key]
+
+
+def _draw(conn, fmt: str, seed: int) -> list[dict]:
+    """Re-draws deterministically until every batting slot can be filled."""
     if fmt not in FORMATS:
         raise DraftError(f"Unknown format {fmt!r}")
     combos = viable_combos(conn, fmt)

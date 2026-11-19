@@ -2,195 +2,140 @@
 
 import { ArrowsDownUpIcon, CheckIcon, CircleIcon, CrosshairIcon, SpinnerGapIcon, TrophyIcon, XIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fmt, ROLE_LABEL } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { fits, isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Candidate, type Challenge, type Spin, type SpinSet } from "@/lib/xi";
+import { isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView } from "@/lib/xi";
 
 const MAX_OVERSEAS = 4;
 const ROLL_MS = 1100;
-
-type BySlot = (Candidate | null)[];
-
-/** Where a fresh pick goes by default: openers open, keepers keep, bowlers bowl. */
-function preference(c: Candidate): number[] {
-  const byRole: Record<Candidate["role"], number[]> = {
-    WK: [6, 3, 4, 5], BAT: [3, 4, 5, 6], AR: [7, 8, 3, 4, 5, 6, 9, 10, 11],
-    BOWL: c.spinner ? [9, 10, 11, 7, 8] : [9, 10, 11],
-  };
-  return [...new Set([...(c.opener ? [1, 2] : []), ...byRole[c.role]])].filter((s) => c.slots.includes(s));
-}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Compact batting range, e.g. [3,4,5,6,9,10,11] -> "3–6, 9–11". */
 function range(slots: number[]): string {
+  const s = [...slots].sort((a, b) => a - b);
   const out: string[] = [];
-  for (let i = 0; i < slots.length; i++) {
+  for (let i = 0; i < s.length; i++) {
     let j = i;
-    while (j + 1 < slots.length && slots[j + 1] === slots[j] + 1) j++;
-    out.push(i === j ? `${slots[i]}` : `${slots[i]}–${slots[j]}`);
+    while (j + 1 < s.length && s[j + 1] === s[j] + 1) j++;
+    out.push(i === j ? `${s[i]}` : `${s[i]}–${s[j]}`);
     i = j;
   }
   return out.join(", ");
 }
 
-/** Can the spins still to be filled cover every empty slot? Bipartite matching;
- * slot 6 needs a keeper unless one already bats in the top five. */
-function completable(bySlot: BySlot, pending: Spin[], used: Set<string>): boolean {
-  const keeperAbove = bySlot.some((p, i) => p?.role === "WK" && i + 1 < KEEPER_SLOT);
-  const empty = bySlot.map((p, i) => (p ? 0 : i + 1)).filter(Boolean);
-  if (empty.length < pending.length) return false;
-  const options = pending.map((s) => empty.filter((slot) => s.candidates.some((c) =>
-    !used.has(c.person) && c.slots.includes(slot) && (slot !== KEEPER_SLOT || c.role === "WK" || keeperAbove))));
-  const owner = new Map<number, number>();
-  const place = (i: number, seen: Set<number>): boolean => {
-    for (const slot of options[i]) {
-      if (seen.has(slot)) continue;
-      seen.add(slot);
-      const j = owner.get(slot);
-      if (j === undefined || place(j, seen)) { owner.set(slot, i); return true; }
-    }
-    return false;
-  };
-  return pending.every((_, i) => place(i, new Set()));
-}
-
-export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean; rival: Challenge | null }) {
+/**
+ * The draft is held by the API: this board shows what it returns and sends each
+ * spin, pick and move back. Spins arrive only as they are revealed, and the legal
+ * slots for each candidate and move come from the server, which checks them
+ * against spins the browser never sees.
+ */
+export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Challenge | null }) {
   const router = useRouter();
-  const { format, spins, positions } = set;
-  const n = spins.length;
-  const [revealed, setRevealed] = useState(0);
-  const [view, setView] = useState<number | null>(null);          // spin whose list is shown
-  const [picks, setPicks] = useState<(Candidate | null)[]>(() => spins.map(() => null));
-  const [slotOf, setSlotOf] = useState<(number | null)[]>(() => spins.map(() => null));
+  const [d, setD] = useState(initial);
+  const [view, setView] = useState<number | null>(initial.revealed ? initial.revealed - 1 : null);
   const [aim, setAim] = useState<number | null>(null);            // empty slot the next pick should take
   const [moving, setMoving] = useState<number | null>(null);      // slot whose player is being moved
-  const [rolling, setRolling] = useState<string | null>(null);    // label shown while the reel spins
+  const [rolling, setRolling] = useState<string | null>(null);    // reel label while spinning
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const reel = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { format, status } = d;
   const t20 = format === "T20I" || format === "IPL";
 
-  const bySlot: BySlot = useMemo(() => {
-    const out: BySlot = Array(11).fill(null);
-    slotOf.forEach((s, i) => { if (s) out[s - 1] = picks[i]; });
-    return out;
-  }, [picks, slotOf]);
-  const spinAt = (slot: number) => slotOf.indexOf(slot);
-  const chosen = picks.filter(Boolean) as Candidate[];
-  const overseas = chosen.filter(isOverseas).length;
-  const allFit = bySlot.every((p, i) => !p || fits(p, i + 1, bySlot));
-  const keeperTop6 = bySlot.slice(0, KEEPER_SLOT).some((p) => p?.role === "WK");
-  const openers = bySlot.slice(0, 2).filter(Boolean).length;
-  const ready = chosen.length === 11 && allFit && keeperTop6 && (format !== "IPL" || overseas <= MAX_OVERSEAS);
-  const waiting = revealed > 0 && picks.slice(0, revealed).some((p) => !p);  // must pick before spinning on
+  async function act(fn: () => Promise<DraftView>) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setD(await fn());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  /** Spins not yet holding a player once spin ``except`` is filled. */
-  const pendingAfter = (except: number) =>
-    spins.filter((_, i) => i !== except && !picks[i]);
-
-  function spin() {
-    if (revealed >= n || rolling) return;
+  async function spin() {
+    if (!d.can_spin || busy) return;
+    setBusy(true);
     setError(null);
     setAim(null);
     setMoving(null);
-    const target = revealed;
-    const land = () => { setRolling(null); setRevealed(target + 1); setView(target); };
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return land();
-    const labels = spins.map((s) => `${s.era} · ${s.side}`);
-    let k = target;
-    setRolling(labels[k % n]);
-    reel.current = setInterval(() => { k = (k + 3) % n; setRolling(labels[k]); }, 70);
-    setTimeout(() => { if (reel.current) clearInterval(reel.current); land(); }, ROLL_MS);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const { eras, sides } = d.reel;
+    const label = () => `${eras[Math.floor(Math.random() * eras.length)]} · ${sides[Math.floor(Math.random() * sides.length)]}`;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (!reduced) {
+      setRolling(label());
+      timer = setInterval(() => setRolling(label()), 70);
+    }
+    try {
+      const [next] = await Promise.all([xiApi.spin(d.id), reduced ? null : sleep(ROLL_MS)]);
+      setD(next);
+      setView(next.revealed - 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't spin.");
+    } finally {
+      if (timer) clearInterval(timer);
+      setRolling(null);
+      setBusy(false);
+    }
   }
 
-  /** The slot ``c`` would take if picked from spin ``i`` now, or why it can't be picked. */
-  function placement(c: Candidate, i: number): { slot: number } | { why: string } {
-    const owner = picks.findIndex((p, j) => j !== i && p?.person === c.person);
-    if (owner >= 0) return { why: `Already in your XI` };
-    const current = picks[i];
-    if (format === "IPL" && isOverseas(c) && !(current && isOverseas(current)) && overseas >= MAX_OVERSEAS) {
-      return { why: "Overseas limit reached" };
-    }
-    const freed = [...bySlot];
-    if (slotOf[i]) freed[slotOf[i]! - 1] = null;
-    const used = new Set(picks.filter((p, j) => p && j !== i).map((p) => p!.person));
-    used.add(c.person);
-    const order = [
-      ...(aim ? [aim] : []), ...(slotOf[i] ? [slotOf[i]!] : []), ...preference(c),
-    ];
-    for (const slot of new Set(order)) {
-      if (freed[slot - 1]) continue;
-      const next = [...freed];
-      next[slot - 1] = c;
-      if (fits(c, slot, next) && completable(next, pendingAfter(i), used)) return { slot };
-    }
-    return { why: c.slots.length ? "No room for this role in your XI" : "Can't bat anywhere" };
-  }
-
-  function pick(c: Candidate, i: number) {
-    const p = placement(c, i);
-    if (!("slot" in p)) return;
-    setPicks((x) => x.map((v, j) => (j === i ? c : v)));
-    setSlotOf((x) => x.map((v, j) => (j === i ? p.slot : v)));
+  function pick(c: DraftCandidate, spinNo: number) {
+    const slot = aim && c.options.includes(aim) ? aim : undefined;
     setAim(null);
-    setError(null);
-  }
-
-  function remove(slot: number) {
-    const i = spinAt(slot);
-    setPicks((x) => x.map((v, j) => (j === i ? null : v)));
-    setSlotOf((x) => x.map((v, j) => (j === i ? null : v)));
-    setView(i);
-    setMoving(null);
-  }
-
-  /** Result of moving the player at ``from`` to ``to`` (swapping if occupied), or null if illegal. */
-  function moved(from: number, to: number): (number | null)[] | null {
-    if (from === to) return null;
-    const a = spinAt(from), b = spinAt(to);
-    const next = slotOf.map((s, j) => (j === a ? to : j === b ? from : s));
-    const board: BySlot = Array(11).fill(null);
-    next.forEach((s, j) => { if (s) board[s - 1] = picks[j]; });
-    if (!board.every((p, k) => !p || fits(p, k + 1, board))) return null;
-    const used = new Set(chosen.map((p) => p.person));
-    return completable(board, spins.filter((_, j) => !picks[j]), used) ? next : null;
+    act(() => xiApi.pick(d.id, spinNo, c.id, slot));
   }
 
   function tapSlot(slot: number) {
     setError(null);
+    const here = d.lineup[slot - 1];
     if (moving !== null) {
-      const next = moved(moving, slot);
-      if (next) setSlotOf(next);
+      const from = moving;
       setMoving(null);
+      if (from !== slot && d.lineup[from - 1].targets.includes(slot)) act(() => xiApi.move(d.id, from, slot));
       return;
     }
-    if (bySlot[slot - 1]) setMoving(slot);
-    else setAim(aim === slot ? null : slot);
+    if (here.player) {
+      if (here.targets.length) setMoving(slot);
+      else setError(`${here.player.name} has nowhere else to bat.`);
+    } else {
+      setAim(aim === slot ? null : slot);
+    }
+  }
+
+  function remove(slot: number) {
+    const spinNo = d.lineup[slot - 1].spin;
+    if (!spinNo) return;
+    setMoving(null);
+    setView(spinNo - 1);
+    act(() => xiApi.unpick(d.id, spinNo));
   }
 
   async function play() {
     setBusy(true);
     setError(null);
     try {
-      const res = await xiApi.series(format, set.seed, picks.map((p) => p!.id), slotOf.map((s) => s!), daily);
-      router.push(`/xi/c/${res.slug}${rival ? `?vs=${rival.slug}` : ""}`);
+      const res = await xiApi.play(d.id);
+      router.push(`/xi/c/${res.slug}${res.rival ? `?vs=${res.rival}` : ""}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't play the series.");
       setBusy(false);
     }
   }
 
-  const shown = view !== null ? spins[view] : null;
-  const nextLabel = revealed >= n ? null : `Spin ${revealed + 1} of ${n}`;
+  const shown = view !== null && view < d.spins.length ? d.spins[view] : null;
+  const latest = d.spins[d.spins.length - 1];
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="label mb-2">
-            {daily ? `Daily challenge · ${set.date}` : `Draw #${set.seed}`} · {XI_COPY[format].title}
+            {d.daily ? `Daily challenge · ${d.daily}` : `Draw #${d.seed}`} · {XI_COPY[format].title}
           </div>
           <h1 className="font-display text-5xl leading-[0.9] font-extrabold uppercase sm:text-6xl">Draft your XI</h1>
         </div>
@@ -204,10 +149,12 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
       <div className="seam" aria-hidden />
 
       <div className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs">
-        <Rule ok={chosen.length === 11} label={`${chosen.length}/11 picked`} />
-        <Rule ok={openers === 2} label={`Openers ${openers}/2`} />
-        <Rule ok={keeperTop6} label="Keeper in the top six" />
-        {format === "IPL" && <Rule ok={overseas <= MAX_OVERSEAS} label={`Overseas ${overseas}/${MAX_OVERSEAS}`} neutral />}
+        <Rule ok={status.picked === 11} label={`${status.picked}/11 picked`} />
+        <Rule ok={status.openers === 2} label={`Openers ${status.openers}/2`} />
+        <Rule ok={status.keeper_top6} label="Keeper in the top six" />
+        {status.overseas !== null && (
+          <Rule ok={status.overseas <= MAX_OVERSEAS} label={`Overseas ${status.overseas}/${MAX_OVERSEAS}`} neutral />
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,23rem)_1fr]">
@@ -220,27 +167,26 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
             </span>
           </div>
           <ol className="divide-y border-y">
-            {positions.map((pos) => {
-              const p = bySlot[pos.slot - 1];
-              const i = spinAt(pos.slot);
-              const target = moving !== null && moving !== pos.slot && moved(moving, pos.slot) !== null;
+            {d.lineup.map((pos) => {
+              const p = pos.player;
+              const origin = pos.spin ? d.spins[pos.spin - 1] : null;
+              const target = moving !== null && moving !== pos.slot && d.lineup[moving - 1].targets.includes(pos.slot);
               const dead = moving !== null && moving !== pos.slot && !target;
               const label = pos.slot === KEEPER_SLOT && p && p.role !== "WK" ? "No. 6" : pos.label;
               return (
                 <li key={pos.slot}
                   className={cn("flex items-center border-l-2 transition-colors",
-                    moving === pos.slot ? "border-signal bg-signal-soft"
+                    moving === pos.slot || aim === pos.slot ? "border-signal bg-signal-soft"
                       : target ? "border-signal/60 bg-signal-soft/50"
-                      : aim === pos.slot ? "border-signal bg-signal-soft"
                       : "border-transparent hover:bg-muted",
                     dead && "opacity-40")}>
-                  <button type="button" onClick={() => tapSlot(pos.slot)} disabled={dead}
+                  <button type="button" onClick={() => tapSlot(pos.slot)} disabled={dead || busy}
                     aria-pressed={moving === pos.slot || aim === pos.slot}
                     className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pr-2 pl-3 text-left">
                     <span className="w-5 font-display text-xl font-bold text-muted-foreground tnum">{pos.slot}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                        {label}{p && i >= 0 ? ` · ${spins[i].era} ${spins[i].side}` : ""}
+                        {label}{origin ? ` · ${origin.era} ${origin.side}` : ""}
                       </span>
                       {p ? (
                         <span className="block truncate font-display text-lg leading-tight font-bold uppercase">{p.name}</span>
@@ -255,7 +201,7 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
                     {!p && !moving && <CrosshairIcon className={cn("size-3.5", aim === pos.slot ? "text-signal" : "text-muted-foreground/50")} />}
                   </button>
                   {p && !moving && (
-                    <button type="button" aria-label={`Remove ${p.name}`} onClick={() => remove(pos.slot)}
+                    <button type="button" aria-label={`Remove ${p.name}`} onClick={() => remove(pos.slot)} disabled={busy}
                       className="px-2.5 py-3 text-muted-foreground hover:text-foreground"><XIcon className="size-3.5" /></button>
                   )}
                   {moving === pos.slot && (
@@ -278,7 +224,7 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
             <div className="flex flex-wrap items-center gap-4 p-4 sm:p-5">
               <div className="min-w-0 flex-1 basis-56">
                 <div className="label mb-1">
-                  {rolling ? "Spinning…" : shown ? `Spin ${shown.spin} of ${n}` : "Eleven spins. One player from each."}
+                  {rolling ? "Spinning…" : shown ? `Spin ${shown.spin} of ${d.total}` : "Eleven spins. One player from each."}
                 </div>
                 <div aria-live="polite"
                   className={cn("font-display text-4xl leading-none font-black text-balance uppercase sm:text-5xl",
@@ -286,28 +232,28 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
                   {rolling ?? (shown ? `${shown.era} ${shown.side}` : "Ready?")}
                 </div>
               </div>
-              {nextLabel && (
-                <Button size="lg" onClick={spin} disabled={!!rolling || waiting}
-                  title={waiting ? "Pick a player from your last spin first" : undefined}
+              {d.revealed < d.total && (
+                <Button size="lg" onClick={spin} disabled={!d.can_spin || busy}
+                  title={d.waiting ? "Pick a player from your last spin first" : undefined}
                   className="h-12 w-full px-6 font-mono uppercase sm:w-auto">
                   <SpinnerGapIcon className={cn(rolling && "animate-spin")} weight="bold" />
-                  {revealed === 0 ? "Spin" : "Spin again"}
+                  {d.revealed === 0 ? "Spin" : "Spin again"}
                 </Button>
               )}
             </div>
             {/* Spins so far: tap one to re-pick from it */}
             <div className="flex gap-1 overflow-x-auto border-t px-4 py-2 sm:px-5" aria-label="Spins">
-              {spins.map((s, i) => {
-                const open = i < revealed;
+              {Array.from({ length: d.total }, (_, i) => {
+                const s = d.spins[i];
                 return (
-                  <button key={s.spin} type="button" disabled={!open || !!rolling} onClick={() => setView(i)}
-                    aria-label={open ? `Spin ${s.spin}: ${s.era} ${s.side}` : `Spin ${s.spin}, not spun yet`}
+                  <button key={i} type="button" disabled={!s || !!rolling} onClick={() => setView(i)}
+                    aria-label={s ? `Spin ${i + 1}: ${s.era} ${s.side}` : `Spin ${i + 1}, not spun yet`}
                     aria-current={view === i ? "true" : undefined}
                     className={cn("grid size-8 shrink-0 place-items-center border font-mono text-xs",
                       view === i ? "border-signal bg-signal text-signal-foreground"
-                        : picks[i] ? "border-foreground/40 bg-muted"
-                        : open ? "border-signal/60 text-foreground" : "border-dashed border-border text-muted-foreground/50")}>
-                    {picks[i] && view !== i ? <CheckIcon className="size-3" weight="bold" /> : s.spin}
+                        : s?.pick ? "border-foreground/40 bg-muted"
+                        : s ? "border-signal/60 text-foreground" : "border-dashed border-border text-muted-foreground/50")}>
+                    {s?.pick && view !== i ? <CheckIcon className="size-3" weight="bold" /> : i + 1}
                   </button>
                 );
               })}
@@ -318,10 +264,9 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
             <>
               <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <span className="text-sm text-muted-foreground">
-                  {waiting && !picks[view!] ? "Pick one player from this spin."
-                    : picks[view!] ? `You took ${picks[view!]!.name}. Pick someone else to swap.`
-                    : "Pick one player."}
-                  {aim ? ` They'll bat at ${aim}.` : ""}
+                  {shown.pick ? `You took ${shown.candidates.find((c) => c.id === shown.pick!.id)?.name}. Pick someone else to swap.`
+                    : "Pick one player from this spin."}
+                  {aim ? ` They'll bat at ${aim} if they can.` : ""}
                 </span>
                 <span className="label normal-case tracking-normal">Figures from that era; legends show career totals</span>
               </div>
@@ -340,11 +285,10 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
                   </thead>
                   <tbody className="font-mono tnum">
                     {shown.candidates.map((c) => {
-                      const place = placement(c, view!);
-                      const why = "why" in place ? place.why : null;
-                      const mine = picks[view!]?.id === c.id;
+                      const mine = shown.pick?.id === c.id;
+                      const lands = aim && c.options.includes(aim) ? aim : c.options[0];
                       return (
-                        <tr key={c.id} className={cn("border-b last:border-0", mine && "bg-signal-soft", why && !mine && "opacity-45")}>
+                        <tr key={c.id} className={cn("border-b last:border-0", mine && "bg-signal-soft", c.why && !mine && "opacity-45")}>
                           <td className="px-2 py-2 font-sans">
                             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                               <span className="mr-0.5 font-semibold">{c.name}</span>
@@ -363,10 +307,10 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
                           <td className="px-2 text-right">{fmt(c.wickets)}</td>
                           <td className="hidden px-2 text-right sm:table-cell">{fmt(c.bowl_econ, 2)}</td>
                           <td className="px-2 py-1.5 text-right">
-                            <Button size="sm" variant={mine ? "default" : "outline"} disabled={!!why || mine}
-                              title={why ?? (mine ? undefined : `Bats at ${"slot" in place ? place.slot : ""}`)}
-                              onClick={() => pick(c, view!)} className="font-mono text-[11px] uppercase">
-                              {mine ? <><CheckIcon />{slotOf[view!]}</> : why ? "—" : `Pick`}
+                            <Button size="sm" variant={mine ? "default" : "outline"} disabled={!!c.why || mine || busy}
+                              title={c.why ?? (mine ? undefined : `Bats at ${lands}`)}
+                              onClick={() => pick(c, shown.spin)} className="font-mono text-[11px] uppercase">
+                              {mine ? <><CheckIcon />{shown.pick!.slot}</> : c.why ? "—" : "Pick"}
                             </Button>
                           </td>
                         </tr>
@@ -390,11 +334,11 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
       <div className="sticky bottom-0 z-20 -mx-4 flex flex-wrap items-center gap-4 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
         <div className="min-w-0 flex-1 text-sm">
           {error ? <span className="text-destructive">{error}</span>
-            : ready ? <span>Ready. Five matches against the {format === "IPL" ? "IPL All-Stars" : `${XI_COPY[format].title} World XI`}.</span>
+            : status.ready ? <span>Ready. Five matches against the {format === "IPL" ? "IPL All-Stars" : `${XI_COPY[format].title} World XI`}.</span>
             : <span className="text-muted-foreground">
-                {chosen.length < 11 ? `${11 - chosen.length} to pick.`
-                  : !keeperTop6 ? "Your keeper has to bat in the top six."
-                  : !allFit ? "Someone's batting out of position."
+                {d.waiting && latest && !latest.pick ? "Pick a player from this spin, then spin again."
+                  : status.picked < 11 ? `${11 - status.picked} to pick.`
+                  : !status.keeper_top6 ? "Your keeper has to bat in the top six."
                   : "Too many overseas players."}
               </span>}
         </div>
@@ -403,8 +347,8 @@ export function DraftBoard({ set, daily, rival }: { set: SpinSet; daily: boolean
             <ArrowsDownUpIcon />Cancel move
           </Button>
         )}
-        <Button size="lg" disabled={!ready || busy} onClick={play} className="h-11 px-6 font-mono uppercase">
-          <TrophyIcon />{busy ? "Playing…" : "Play the series"}
+        <Button size="lg" disabled={!status.ready || busy} onClick={play} className="h-11 px-6 font-mono uppercase">
+          <TrophyIcon />{busy && status.ready ? "Playing…" : "Play the series"}
         </Button>
       </div>
     </div>

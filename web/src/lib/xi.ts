@@ -41,19 +41,44 @@ export interface Position {
   short: string;
 }
 
-export interface Spin {
+/** A candidate as the draft sees it: the slots it could take right now (best
+ * first), or why it can't be picked. */
+export interface DraftCandidate extends Candidate {
+  options: number[];
+  why: string | null;
+}
+
+export interface RevealedSpin {
   spin: number;
   era: string;
   side: string;
-  candidates: Candidate[];
+  candidates: DraftCandidate[];
+  pick: { id: string; slot: number } | null;
 }
 
-export interface SpinSet {
+export interface LineupSlot extends Position {
+  spin: number | null;
+  player: Candidate | null;
+  /** Slots this player may move to (swapping with whoever is there). */
+  targets: number[];
+}
+
+export interface DraftView {
+  id: string;
   format: XIFormat;
   seed: number;
-  date?: string;
+  daily: string | null;
+  rival: string | null;
+  challenge: string | null;
   positions: Position[];
-  spins: Spin[];
+  reel: { eras: string[]; sides: string[] };
+  revealed: number;
+  total: number;
+  spins: RevealedSpin[];
+  lineup: LineupSlot[];
+  can_spin: boolean;
+  waiting: boolean;
+  status: { picked: number; openers: number; keeper_top6: boolean; overseas: number | null; ready: boolean };
 }
 
 export interface MatchSummary {
@@ -85,7 +110,6 @@ export interface Challenge {
   opponent: string;
   result: SeriesResult;
   matches: MatchSummary[];
-  spins?: Spin[];
   created_at?: string;
 }
 
@@ -131,11 +155,17 @@ export interface FullMatch {
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(API_URL + path, {
-    ...init,
-    cache: "no-store",
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-  });
+  let res: Response;
+  try {
+    res = await fetch(API_URL + path, {
+      ...init,
+      cache: "no-store",
+      headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    });
+  } catch {
+    // The browser only says "Failed to fetch": the API is down or unreachable.
+    throw new Error("Can't reach the game server. Check that the API is running and try again.");
+  }
   if (res.status === 404) throw new NotFound(path);
   if (!res.ok) {
     let detail = `API ${res.status}`;
@@ -148,23 +178,22 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const post = (body?: unknown) => ({ method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+const draftPath = (id: string) => `/xi/drafts/${encodeURIComponent(id)}`;
+
 export const xiApi = {
-  spin: (format: XIFormat, seed?: number) =>
-    call<SpinSet>("/xi/spin", { method: "POST", body: JSON.stringify({ format, seed }) }),
-  daily: (format: XIFormat) => call<SpinSet>(`/xi/daily/${format}`),
-  series: (format: XIFormat, seed: number, picks: string[], slots: number[], daily = false) =>
-    call<Challenge>("/xi/series", { method: "POST", body: JSON.stringify({ format, seed, picks, slots, daily }) }),
+  newDraft: (format: XIFormat, opts: { seed?: number; daily?: boolean; vs?: string }) =>
+    call<DraftView>("/xi/drafts", post({ format, ...opts })),
+  draft: (id: string) => call<DraftView>(draftPath(id)),
+  spin: (id: string) => call<DraftView>(`${draftPath(id)}/spin`, post()),
+  pick: (id: string, spin: number, player: string, slot?: number) =>
+    call<DraftView>(`${draftPath(id)}/pick`, post({ spin, player, slot })),
+  unpick: (id: string, spin: number) => call<DraftView>(`${draftPath(id)}/pick/${spin}`, { method: "DELETE" }),
+  move: (id: string, from: number, to: number) => call<DraftView>(`${draftPath(id)}/move`, post({ from, to })),
+  play: (id: string) => call<{ slug: string; rival: string | null }>(`${draftPath(id)}/play`, post()),
   challenge: (slug: string) => call<Challenge>(`/xi/challenge/${encodeURIComponent(slug)}`),
   match: (slug: string, n: number) => call<FullMatch>(`/xi/challenge/${encodeURIComponent(slug)}/match/${n}`),
 };
 
 export const isOverseas = (c: Pick<Candidate, "country">) => !!c.country && c.country !== "India";
 export const KEEPER_SLOT = 6;
-
-/** Can ``c`` bat at ``slot``, given who else bats where? Slot 6 is the keeper's
- * unless a keeper already bats in the top five. */
-export function fits(c: Candidate, slot: number, bySlot: (Candidate | null)[]): boolean {
-  if (!c.slots.includes(slot)) return false;
-  if (slot !== KEEPER_SLOT || c.role === "WK") return true;
-  return bySlot.some((p, i) => p && p.role === "WK" && i + 1 < KEEPER_SLOT && p.id !== c.id);
-}

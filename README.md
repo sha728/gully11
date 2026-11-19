@@ -51,10 +51,14 @@ npm run dev                                      # http://localhost:3000: search
 - **CI** (`.github/workflows/ci.yml`, every PR and push to `main`): pipeline tests, API +
   simulator tests (database tests skip), web type check, lint and production build. No
   data downloads, so it stays fast.
-- **Integration** (`.github/workflows/integration.yml`, weekly and on demand): downloads
-  fresh Cricsheet data, runs the whole pipeline into a Postgres service, then the API
-  tests with `REQUIRE_DB=1` (missing data fails instead of skipping) and an informational
-  simulator check against the latest IPL season.
+- **Integration** (`.github/workflows/integration.yml`, weekly and on demand): runs the
+  whole pipeline into a Postgres service, then the API tests with `REQUIRE_DB=1` (missing
+  data fails instead of skipping) and an informational simulator check against the latest
+  IPL season.
+  - cricsheet.org challenges CI servers, so the workflow reads the newest `data-YYYY-MM-DD`
+    [release](https://github.com/sha728/gully11/releases) of this repo: the same two
+    Cricsheet files, published from a normal machine.
+  - To refresh it, run `gully-pipeline download --dataset all` then `gully-pipeline snapshot`.
 
 Work happens on feature branches merged into `main` through pull requests.
 

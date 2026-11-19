@@ -2,7 +2,7 @@ import argparse
 import time
 
 from .aggregate import build
-from .download import DATASETS, download_dataset, download_register
+from .download import DATASETS, download_dataset, download_register, download_snapshot
 from .parse import iter_zip_matches, write_parquet
 from .paths import DB_PATH, PARQUET_DIR, RAW_DIR
 
@@ -13,6 +13,12 @@ def main(argv: list[str] | None = None) -> None:
 
     d = sub.add_parser("download", help="Download a Cricsheet archive and the people register")
     d.add_argument("--dataset", choices=DATASETS, default="all")
+    d.add_argument("--source", choices=["cricsheet", "snapshot"], default="cricsheet",
+                   help="snapshot: newest data-* GitHub Release of --repo (for CI)")
+    d.add_argument("--repo", default="sha728/gully11", help="owner/name for --source snapshot")
+
+    sn = sub.add_parser("snapshot", help="Publish downloaded Cricsheet files as a GitHub Release (for CI)")
+    sn.add_argument("--repo", default="sha728/gully11")
 
     s = sub.add_parser("parse", help="Parse a downloaded archive into Parquet")
     s.add_argument("--dataset", choices=DATASETS, default="all")
@@ -94,10 +100,20 @@ def main(argv: list[str] | None = None) -> None:
         print(f"-> {DB_PATH} ({time.perf_counter() - t0:.1f}s)")
         return
 
-    if args.cmd == "download":
+    if args.cmd == "download" and args.source == "snapshot":
+        if args.dataset != "all":
+            p.error("snapshots hold the full dataset; use --dataset all")
+        tag, paths = download_snapshot(args.repo)
+        print(f"Snapshot {tag} from {args.repo}")
+        for path in paths:
+            print("  ->", path)
+    elif args.cmd == "download":
         print("Downloading", DATASETS[args.dataset], "...")
         print("  ->", download_dataset(args.dataset))
         print("  ->", download_register())
+    elif args.cmd == "snapshot":
+        from .snapshot import publish
+        print("Published", publish(args.repo))
     elif args.cmd == "parse":
         zip_path = RAW_DIR / DATASETS[args.dataset]
         if not zip_path.exists():

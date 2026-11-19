@@ -48,7 +48,9 @@ jobs:
         working-directory: pipeline
         run: |
           uv sync --locked
-          uv run gully-pipeline download --dataset all
+          # cricsheet.org challenges CI servers, so use the newest data-* release
+          # snapshot of this repo (publish one with `gully-pipeline snapshot`).
+          uv run gully-pipeline download --dataset all --source snapshot --repo ${{ github.repository }}
           uv run gully-pipeline parse --dataset all
           uv run gully-pipeline build --dataset all
           uv run gully-pipeline spotcheck

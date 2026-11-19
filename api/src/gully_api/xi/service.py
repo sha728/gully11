@@ -347,8 +347,14 @@ def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
         for r in conn.execute("SELECT * FROM player_phase_stats WHERE format = %s AND player_id = ANY(%s)",
                               (spec.stats, modern_ids)).fetchall():
             rows[r["player_id"]].append(r)
+        # Phase stats cover the format family (all T20s for the IPL); a part-timer's
+        # wickets come from this format alone.
+        wickets = {r["player_id"]: r["wickets"] for r in conn.execute(
+            "SELECT player_id, wickets FROM player_format_stats WHERE format = %s AND player_id = ANY(%s)",
+            (fmt, modern_ids)).fetchall()}
         for pid, p in players.items():
             out[pid] = from_phase_rows(p, rows[pid], env)
+            out[pid].wickets = wickets.get(pid) or 0
     missing = set(ids) - set(out)
     if missing:
         raise DraftError(f"Unknown players: {sorted(missing)}")

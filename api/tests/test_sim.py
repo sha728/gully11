@@ -150,6 +150,26 @@ def test_batters_only_bowl_when_specialists_cannot(env):
                    if a.players[int(pid[1:])].role in ("BAT", "WK")), s
 
 
+def test_captains_hunch_is_rare_and_one_over(env):
+    # A batter with a real bowling record now and then gets one middle over; one
+    # without (under 10 wickets in the format) never does.
+    five = ["BAT"] * 5 + ["WK"] + ["BOWL"] * 5
+    players = [league_player(f"A{i}", env, r) for i, r in enumerate(five)]
+    players[3].wickets, players[4].wickets = 40, 4
+    a, b = Team("A", players), avg_team("B", env)
+    used, n = 0, 400
+    for s in range(n):
+        m = simulate_match(a, b, env, s)
+        inn = next(i for i in m.innings if i.bowling == "A")
+        assert inn.bowl["A4"].balls == 0
+        if inn.bowl["A3"].balls:
+            used += 1
+            overs = {int(e["ball"].split(".")[0]) for e in m.commentary
+                     if e["bowler"] == "A3" and e["inns"] == m.innings.index(inn) + 1}
+            assert len(overs) == 1 and env.phase(overs.pop()) == "middle"
+    assert 0.05 < used / n < 0.16
+
+
 def test_equal_teams_are_balanced(env):
     a, b = avg_team("A", env), avg_team("B", env)
     res = [simulate_match(a, b, env, s, commentary=False) for s in range(1500)]

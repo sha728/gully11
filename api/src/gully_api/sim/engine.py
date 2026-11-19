@@ -25,6 +25,10 @@ from .rates import RUNS, Env, load_env
 
 CREDITED = {"caught", "bowled", "lbw", "caught and bowled", "stumped", "hit wicket"}
 RUN_OUT_NON_STRIKER = 0.4  # share of run outs that dismiss the non-striker
+# A batter with a real bowling record (wickets in this format) gets a one-over
+# "captain's hunch" in the middle overs this often per limited-overs innings.
+PART_TIMER_CHANCE = 0.1
+PART_TIMER_MIN_WICKETS = 10
 
 
 def _coverable(quota: dict[str, int], overs: int, last: str) -> bool:
@@ -330,11 +334,23 @@ class _Match:
             return (inn.wickets >= 10 or inn.legal_balls >= n_balls
                     or (target is not None and inn.runs >= target))
 
+        # Luck: now and then the captain gives a batter who can bowl a middle over.
+        hunch, hunch_over, announced = None, -1, False
+        if not env.is_test:
+            arms = [p.id for p in bowl_team.players
+                    if p.role not in WICKET_ROLES and p.id != keeper and p.wickets >= PART_TIMER_MIN_WICKETS]
+            middle = [o for o in range(max_overs) if env.phase(o) == "middle"]
+            if arms and middle and rng.random() < PART_TIMER_CHANCE:
+                hunch, hunch_over = rng.choice(arms), rng.choice(middle)
+
         for over in range(max_overs):
             if done():
                 break
             phase = env.phase(over)
-            bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
+            if over == hunch_over and hunch != last_bowler and left[hunch] > 0:
+                bid = hunch
+            else:
+                bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
             bowler = by_id[bid]
             bl = inn.bowl[bid]
             legal_in_over, runs_in_over = 0, 0
@@ -423,6 +439,9 @@ class _Match:
                 event["score"] = f"{inn.runs}/{inn.wickets}"
                 if self.with_commentary:
                     event["text"] = describe(event, len(self.commentary))
+                    if bid == hunch and not announced:
+                        announced = True
+                        event["text"] = f"Captain's hunch: {bowler.name} has a bowl. " + event["text"]
                     self.commentary.append(event)
                     if not env.is_test:
                         self.win_prob.append(

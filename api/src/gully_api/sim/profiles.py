@@ -53,6 +53,7 @@ class Profile:
     noball: dict[str, float]
     balls_bowled: int = 0                  # career sample, used to pick bowlers
     balls_faced: int = 0
+    wickets: int = 0                       # in the simulated format (part-timer check)
     estimated: bool = False
     meta: dict = field(default_factory=dict)
 
@@ -230,6 +231,7 @@ def from_legend(row: dict, env: Env) -> Profile:
                        bowl_avg=row.get("bowl_avg") if (row.get("wickets") or 0) >= 10 else None,
                        bowl_econ=row.get("bowl_econ") if (row.get("wickets") or 0) >= 10 else None)
     prof.meta.update(legend=True, sr_estimated=not row.get("bat_sr"))
+    prof.wickets = row.get("wickets") or 0
     return prof
 
 

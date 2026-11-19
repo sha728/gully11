@@ -36,6 +36,22 @@ def test_html_instead_of_zip_fails_clearly(tmp_path, monkeypatch):
     assert not (tmp_path / "all_json.zip").exists() and not list(tmp_path.glob("*.part"))
 
 
+def test_latest_snapshot_picks_newest_data_release(monkeypatch):
+    releases = [
+        {"tag_name": "v1.0", "assets": []},
+        {"tag_name": "data-2026-11-01", "assets": [{"name": "all_json.zip", "browser_download_url": "u1"}]},
+        {"tag_name": "data-2026-11-19", "assets": [{"name": "all_json.zip", "browser_download_url": "u2"},
+                                                    {"name": "people.csv", "browser_download_url": "u3"}]},
+    ]
+    monkeypatch.setattr(download.httpx, "get",
+                        lambda url, **kw: httpx.Response(200, json=releases, request=httpx.Request("GET", url)))
+    assert download.latest_snapshot("o/r")["tag_name"] == "data-2026-11-19"
+    monkeypatch.setattr(download.httpx, "get",
+                        lambda url, **kw: httpx.Response(200, json=releases[:1], request=httpx.Request("GET", url)))
+    with pytest.raises(download.DownloadError, match="no data-"):
+        download.latest_snapshot("o/r")
+
+
 def test_register_header_checked(tmp_path, monkeypatch):
     _patch(monkeypatch, b"identifier,name,unique_name\n", ctype="text/csv")
     assert download.download_register(tmp_path).exists()

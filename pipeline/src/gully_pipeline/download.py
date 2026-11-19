@@ -66,6 +66,37 @@ def _fetch(url: str, dest: Path, expect: bytes) -> Path:
     return dest
 
 
+# ---------------------------------------------------------------- snapshots
+# Cricsheet answers datacenter IPs (e.g. GitHub Actions runners) with a browser
+# check, so CI can't fetch it directly. A snapshot is the same two files published
+# from a normal machine as a GitHub Release tagged data-YYYY-MM-DD; Cricsheet's
+# ODC-BY licence allows redistribution with attribution (in the release notes).
+SNAPSHOT_PREFIX = "data-"
+SNAPSHOT_FILES = {"all_json.zip": ZIP_MAGIC, "people.csv": REGISTER_HEADER}
+
+
+def latest_snapshot(repo: str) -> dict:
+    """Newest data-* release of ``repo`` (owner/name) via the public GitHub API."""
+    r = httpx.get(f"https://api.github.com/repos/{repo}/releases", timeout=60,
+                  headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"})
+    r.raise_for_status()
+    snaps = [rel for rel in r.json() if rel["tag_name"].startswith(SNAPSHOT_PREFIX)]
+    if not snaps:
+        raise DownloadError(f"{repo} has no {SNAPSHOT_PREFIX}* release; run `gully-pipeline snapshot` first")
+    return max(snaps, key=lambda rel: rel["tag_name"])
+
+
+def download_snapshot(repo: str, raw_dir: Path = RAW_DIR) -> tuple[str, list[Path]]:
+    """Fetch the newest snapshot's files into ``raw_dir``. Returns (tag, paths)."""
+    rel = latest_snapshot(repo)
+    assets = {a["name"]: a["browser_download_url"] for a in rel["assets"]}
+    missing = set(SNAPSHOT_FILES) - set(assets)
+    if missing:
+        raise DownloadError(f"snapshot {rel['tag_name']} is missing {sorted(missing)}")
+    paths = [_fetch(assets[name], raw_dir / name, magic) for name, magic in SNAPSHOT_FILES.items()]
+    return rel["tag_name"], paths
+
+
 def download_dataset(name: str, raw_dir: Path = RAW_DIR) -> Path:
     filename = DATASETS[name]
     return _fetch(f"{BASE}/downloads/{filename}", raw_dir / filename, ZIP_MAGIC)

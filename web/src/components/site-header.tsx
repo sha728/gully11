@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/players", label: "Players" },
   { href: "/compare", label: "Head to head" },
+  { href: "/xi", label: "XI Builder" },
   { href: "/venues", label: "Grounds" },
 ];
 

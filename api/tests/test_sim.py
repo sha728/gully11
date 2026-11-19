@@ -91,7 +91,7 @@ def test_innings_and_scorecard_rules(env_name, overs):
         # the chase stops as soon as the target is reached
         if r.winner == r.teams[1]:
             assert 0 <= i2.runs - i2.target <= 6
-            assert "wickets" in r.margin
+            assert "wicket" in r.margin
         # no bowler bowls two overs in a row
         for n in (1, 2):
             overs_by = {}

@@ -155,6 +155,11 @@ def _pick(rng: random.Random, probs) -> int:
     return len(probs) - 1
 
 
+def _n(count: int, word: str) -> str:
+    """'1 run', '2 runs'."""
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
 def _phi(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
@@ -487,9 +492,9 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
 
     if i2.runs > i1.runs:
         balls_left = env.overs * 6 - i2.legal_balls
-        winner, margin = second.name, f"won by {10 - i2.wickets} wickets ({balls_left} balls left)"
+        winner, margin = second.name, f"won by {_n(10 - i2.wickets, 'wicket')} ({_n(balls_left, 'ball')} left)"
     elif i1.runs > i2.runs:
-        winner, margin = first.name, f"won by {i1.runs - i2.runs} runs"
+        winner, margin = first.name, f"won by {_n(i1.runs - i2.runs, 'run')}"
     else:
         winner, margin = None, "match tied"
     return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name),
@@ -578,18 +583,18 @@ def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
     need = totals[third.name] - totals[fourth.name] + 1
     if need <= 0:
         # The side batting third is still behind: beaten by an innings.
-        return won(fourth, f"won by an innings and {1 - need} runs")
+        return won(fourth, f"won by an innings and {_n(1 - need, 'run')}")
     if left <= 0:
         return draw()
 
     i4 = m.innings(fourth, third, 4, need, max_overs=left)
     innings.append(i4)
     if i4.runs >= need:
-        return won(fourth, f"won by {10 - i4.wickets} wickets")
+        return won(fourth, f"won by {_n(10 - i4.wickets, 'wicket')}")
     if i4.wickets >= 10:
         if i4.runs == need - 1:
             return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
                                winner=None, margin="match tied", commentary=m.commentary,
                                win_prob=[], result="tie")
-        return won(third, f"won by {need - 1 - i4.runs} runs")
+        return won(third, f"won by {_n(need - 1 - i4.runs, 'run')}")
     return draw()

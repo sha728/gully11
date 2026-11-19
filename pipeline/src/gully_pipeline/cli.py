@@ -23,7 +23,24 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("load", help="Load the DuckDB player tables into Postgres")
 
+    sc = sub.add_parser("spotcheck", help="Recount players from raw JSON and compare with tables")
+    sc.add_argument("names", nargs="*", help="Cricsheet unique names (default: 10 preset players)")
+
     args = p.parse_args(argv)
+
+    if args.cmd == "spotcheck":
+        from .spotcheck import DEFAULT_PLAYERS, run
+        t0 = time.perf_counter()
+        rows = run(RAW_DIR / DATASETS["all"], DB_PATH, args.names or DEFAULT_PLAYERS)
+        bad = [r for r in rows if r["table"] != r["raw"]]
+        pairs = {(r["player"], r["format"]) for r in rows}
+        print(f"{len(pairs)} player-formats, {len(rows)} values checked "
+              f"({time.perf_counter() - t0:.0f}s)")
+        for r in bad:
+            print(f"  MISMATCH {r['player']:16} {r['format']:5} {r['field']:14} "
+                  f"table={r['table']} raw={r['raw']}")
+        print("OK: all match" if not bad else f"{len(bad)} mismatches")
+        raise SystemExit(1 if bad else 0)
 
     if args.cmd == "load":
         from .load import database_url, load

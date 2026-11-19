@@ -26,6 +26,8 @@ uv run gully-pipeline download --dataset all     # ~150 MB; or: ipl / tests / od
 uv run gully-pipeline parse --dataset all        # -> data/parquet/all (~4 min)
 uv run gully-pipeline build --dataset all        # -> data/gully.duckdb player tables
 uv run gully-pipeline load                       # -> Postgres (drops + reloads player tables)
+uv run gully-pipeline spotcheck                  # recount 10 players from raw JSON, diff vs tables
+uv run gully-pipeline legends                    # rebuild reference/legends.csv (needs WIKIMEDIA_CONTACT)
 uv run pytest
 
 # API
@@ -41,4 +43,4 @@ npm run dev                                      # http://localhost:3000
 
 ## Data credits
 
-Match data from [Cricsheet](https://cricsheet.org/), licensed under the [Open Data Commons Attribution License](https://cricsheet.org/licensing/). Player batting/bowling styles from Wikipedia (CC BY-SA 4.0).
+Match data from [Cricsheet](https://cricsheet.org/), licensed under the [Open Data Commons Attribution License](https://cricsheet.org/licensing/). Pre-2001 legends' career figures and player batting/bowling styles from Wikipedia (CC BY-SA 4.0); each row of `pipeline/reference/legends.csv` links the exact article revision it was read from.

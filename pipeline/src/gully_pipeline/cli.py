@@ -26,7 +26,20 @@ def main(argv: list[str] | None = None) -> None:
     sc = sub.add_parser("spotcheck", help="Recount players from raw JSON and compare with tables")
     sc.add_argument("names", nargs="*", help="Cricsheet unique names (default: 10 preset players)")
 
+    sub.add_parser("legends", help="Rebuild reference/legends.csv from Wikipedia infoboxes")
+
     args = p.parse_args(argv)
+
+    if args.cmd == "legends":
+        from .legends import LEGENDS_CSV, build_legends
+        rows = build_legends()
+        players = {r["name"] for r in rows}
+        print(f"{len(players)} players, {len(rows)} player-format rows -> {LEGENDS_CSV}")
+        for col in ("role", "batting_hand", "bowling_type", "format_end"):
+            missing = sorted({r["name"] for r in rows if r[col] is None})
+            if missing:
+                print(f"  missing {col}: {missing}")
+        return
 
     if args.cmd == "spotcheck":
         from .spotcheck import DEFAULT_PLAYERS, run

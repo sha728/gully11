@@ -21,7 +21,19 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("build", help="Build player tables in DuckDB from parsed Parquet")
     b.add_argument("--dataset", choices=DATASETS, default="all")
 
+    sub.add_parser("load", help="Load the DuckDB player tables into Postgres")
+
     args = p.parse_args(argv)
+
+    if args.cmd == "load":
+        from .load import database_url, load
+        if not DB_PATH.exists():
+            p.error(f"{DB_PATH} not found; run `build` first")
+        t0 = time.perf_counter()
+        for table, n in load(DB_PATH, database_url()).items():
+            print(f"{table:22} {n:>10,}")
+        print(f"-> Postgres ({time.perf_counter() - t0:.1f}s)")
+        return
 
     if args.cmd == "build":
         src = PARQUET_DIR / args.dataset

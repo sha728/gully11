@@ -25,12 +25,14 @@ uv sync
 uv run gully-pipeline download --dataset all     # ~150 MB; or: ipl / tests / odis / t20s
 uv run gully-pipeline parse --dataset all        # -> data/parquet/all (~4 min)
 uv run gully-pipeline build --dataset all        # -> data/gully.duckdb player tables
+uv run gully-pipeline load                       # -> Postgres (drops + reloads player tables)
 uv run pytest
 
 # API
 cd ../api
 uv sync
-uv run uvicorn gully_api.main:app --reload       # http://localhost:8000/api/v1/health
+uv run uvicorn gully_api.main:app --reload       # http://localhost:8000/docs
+uv run pytest                                    # player tests skip if Postgres isn't loaded
 
 # Web
 cd ../web

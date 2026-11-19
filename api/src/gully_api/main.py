@@ -1,9 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import players
+from .db import pool
 from .settings import settings
 
-app = FastAPI(title="Gully11 API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    pool.open()
+    try:
+        yield
+    finally:
+        pool.close()
+
+
+app = FastAPI(title="Gully11 API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -19,4 +33,5 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+v1.include_router(players.router)
 app.include_router(v1)

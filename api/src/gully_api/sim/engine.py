@@ -20,11 +20,19 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .commentary import describe
-from .profiles import Profile, expected
+from .profiles import WICKET_ROLES, Profile, expected
 from .rates import RUNS, Env, load_env
 
 CREDITED = {"caught", "bowled", "lbw", "caught and bowled", "stumped", "hit wicket"}
 RUN_OUT_NON_STRIKER = 0.4  # share of run outs that dismiss the non-striker
+
+
+def _coverable(quota: dict[str, int], overs: int, last: str) -> bool:
+    """Can these quotas bowl ``overs`` more overs, never the same bowler twice in a
+    row, when ``last`` bowled the over just gone? Nobody can bowl more than every
+    other over: ceil(n/2) of n, or floor(n/2) for the bowler who has just bowled."""
+    cap = {b: (overs // 2 if b == last else (overs + 1) // 2) for b in quota}
+    return sum(min(max(q, 0), cap[b]) for b, q in quota.items()) >= overs
 
 
 @dataclass
@@ -252,6 +260,17 @@ class _Match:
             keeper = team.keeper_id()
             eligible = [p.id for p in team.players + team.impact
                         if p.id not in (last, keeper) and left[p.id] > 0]
+        elif not env.is_test:
+            # Plan the rest of the innings: prefer bowlers who leave the specialists
+            # (bowlers and all-rounders) able to bowl out the remaining overs, so a
+            # batter only turns his arm over when the specialists can't.
+            main = [b for b in options if by_id[b].role in WICKET_ROLES]
+            for pool in (main, options):
+                ok = [b for b in eligible if b in pool
+                      and _coverable({o: left[o] - (o == b) for o in pool}, overs_left - 1, b)]
+                if ok:
+                    eligible = ok
+                    break
 
         def value(pid: str, ph: str) -> float:
             p = by_id[pid]

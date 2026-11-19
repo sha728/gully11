@@ -138,6 +138,18 @@ def test_stronger_team_wins_more(env):
     assert wins["S"] / 300 > 0.8
 
 
+def test_batters_only_bowl_when_specialists_cannot(env):
+    # Five specialists can bowl all 20 overs, so the batters never should, even a
+    # part-timer who'd look decent on paper.
+    five = ["BAT"] * 5 + ["WK"] + ["BOWL"] * 5
+    a = Team("A", [league_player(f"A{i}", env, r) for i, r in enumerate(five)])
+    b = avg_team("B", env)
+    for s in range(100):
+        inn = next(i for i in simulate_match(a, b, env, s, commentary=False).innings if i.bowling == "A")
+        assert all(line.balls == 0 for pid, line in inn.bowl.items()
+                   if a.players[int(pid[1:])].role in ("BAT", "WK")), s
+
+
 def test_equal_teams_are_balanced(env):
     a, b = avg_team("A", env), avg_team("B", env)
     res = [simulate_match(a, b, env, s, commentary=False) for s in range(1500)]

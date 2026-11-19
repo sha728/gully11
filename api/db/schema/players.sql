@@ -4,7 +4,7 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Children before parents (foreign keys).
-DROP TABLE IF EXISTS legends, player_teams,
+DROP TABLE IF EXISTS player_opening, legends, player_teams,
     player_venue_stats, player_dismissals, venue_format_stats, venues,
     player_phase_form, player_phase_stats, player_season_stats, player_format_stats, players;
 
@@ -19,7 +19,7 @@ CREATE TABLE players (
     country             text,
     role                text NOT NULL CHECK (role IN ('BAT', 'BOWL', 'AR', 'WK')),
     batting_hand        text,
-    bowling_style       text,
+    bowling_style       text,              -- 'spin' / 'pace', from stumpings off their bowling
     is_overseas_for_ipl boolean,
     capped              boolean NOT NULL,
     era_start           integer,
@@ -246,6 +246,7 @@ CREATE TABLE legends (
     batting_hand text,
     bowling_arm  text,
     bowling_type text,
+    opener       boolean NOT NULL DEFAULT false,
     format_start integer,
     format_end   integer,
     era_start    integer,
@@ -264,3 +265,12 @@ CREATE TABLE player_teams (
     PRIMARY KEY (player_id, format, season, team)
 );
 CREATE INDEX player_teams_lookup ON player_teams (format, team, season);
+
+-- Openers: innings batted and innings opened, per format ---------------------
+CREATE TABLE player_opening (
+    player_id text NOT NULL REFERENCES players (id),
+    format    text NOT NULL,
+    innings   integer NOT NULL,
+    opened    integer NOT NULL,
+    PRIMARY KEY (player_id, format)
+);

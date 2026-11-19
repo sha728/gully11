@@ -91,7 +91,7 @@ def test_innings_and_scorecard_rules(env_name, overs):
         # the chase stops as soon as the target is reached
         if r.winner == r.teams[1]:
             assert 0 <= i2.runs - i2.target <= 6
-            assert "wickets" in r.margin
+            assert "wicket" in r.margin
         # no bowler bowls two overs in a row
         for n in (1, 2):
             overs_by = {}
@@ -136,6 +136,38 @@ def test_stronger_team_wins_more(env):
     weak = career_team("W", env, bat_avg=20, bat_sr=120, bowl_avg=38, bowl_econ=10.0)
     wins = Counter(simulate_match(strong, weak, env, s, commentary=False).winner for s in range(300))
     assert wins["S"] / 300 > 0.8
+
+
+def test_batters_only_bowl_when_specialists_cannot(env):
+    # Five specialists can bowl all 20 overs, so the batters never should, even a
+    # part-timer who'd look decent on paper.
+    five = ["BAT"] * 5 + ["WK"] + ["BOWL"] * 5
+    a = Team("A", [league_player(f"A{i}", env, r) for i, r in enumerate(five)])
+    b = avg_team("B", env)
+    for s in range(100):
+        inn = next(i for i in simulate_match(a, b, env, s, commentary=False).innings if i.bowling == "A")
+        assert all(line.balls == 0 for pid, line in inn.bowl.items()
+                   if a.players[int(pid[1:])].role in ("BAT", "WK")), s
+
+
+def test_captains_hunch_is_rare_and_one_over(env):
+    # A batter with a real bowling record now and then gets one middle over; one
+    # without (under 10 wickets in the format) never does.
+    five = ["BAT"] * 5 + ["WK"] + ["BOWL"] * 5
+    players = [league_player(f"A{i}", env, r) for i, r in enumerate(five)]
+    players[3].wickets, players[4].wickets = 40, 4
+    a, b = Team("A", players), avg_team("B", env)
+    used, n = 0, 400
+    for s in range(n):
+        m = simulate_match(a, b, env, s)
+        inn = next(i for i in m.innings if i.bowling == "A")
+        assert inn.bowl["A4"].balls == 0
+        if inn.bowl["A3"].balls:
+            used += 1
+            overs = {int(e["ball"].split(".")[0]) for e in m.commentary
+                     if e["bowler"] == "A3" and e["inns"] == m.innings.index(inn) + 1}
+            assert len(overs) == 1 and env.phase(overs.pop()) == "middle"
+    assert 0.05 < used / n < 0.16
 
 
 def test_equal_teams_are_balanced(env):

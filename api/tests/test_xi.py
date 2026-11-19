@@ -1,5 +1,6 @@
 """XI Builder integration tests (need the loaded database, like test_players)."""
 
+import json
 from datetime import date
 
 import pytest
@@ -12,6 +13,7 @@ from xi_helpers import auto_draft
 
 pytestmark = pytest.mark.skipif(not _db_loaded(), reason="Postgres not running or not loaded")
 FORMATS = ["Test", "ODI", "T20I", "IPL"]
+X = "/api/v1/xi"
 
 
 @pytest.fixture(scope="module")
@@ -20,22 +22,119 @@ def client():
         yield c
 
 
-def spin(client, fmt, seed):
-    r = client.post("/api/v1/xi/spin", json={"format": fmt, "seed": seed})
-    assert r.status_code == 200
-    return r.json()["spins"]
+def server_spins(fmt, seed):
+    from gully_api import db
+    with db._pool.connection() as conn:
+        return service.spins(conn, fmt, seed)
+
+
+def draft(client, **body):
+    r = client.post(f"{X}/drafts", json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def fill(client, d):
+    """Spin and pick through a whole draft, taking the first pickable player each time."""
+    for _ in range(d["total"] - d["revealed"]):
+        d = client.post(f"{X}/drafts/{d['id']}/spin").json()
+        spin = d["spins"][-1]
+        c = next(c for c in spin["candidates"] if c["options"])
+        r = client.post(f"{X}/drafts/{d['id']}/pick", json={"spin": spin["spin"], "player": c["id"]})
+        assert r.status_code == 200, r.text
+        d = r.json()
+    return d
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
-def test_spins_are_seeded_and_draftable(client, fmt):
-    s1, s2 = spin(client, fmt, 123), spin(client, fmt, 123)
-    assert s1 == s2 and len(s1) == 11
-    assert spin(client, fmt, 124) != s1
+def test_spins_are_seeded_and_fillable(client, fmt):
+    s1 = server_spins(fmt, 123)
+    assert s1 == server_spins(fmt, 123) and len(s1) == 11
+    assert server_spins(fmt, 124) != s1
     for s in s1:
         assert s["era"] in service.FORMATS[fmt].eras
         assert len(s["candidates"]) >= service.MIN_CANDIDATES
-    picks = auto_draft(s1, 4 if fmt == "IPL" else None)
-    assert len(set(picks)) == 11
+        for c in s["candidates"]:
+            assert c["slots"] == service.eligible_slots(c)
+    picks, slots = auto_draft(s1, 4 if fmt == "IPL" else None)
+    assert len(set(picks)) == 11 and sorted(slots) == list(range(1, 12))
+
+
+def test_spins_depend_on_the_server_secret(monkeypatch):
+    from gully_api.settings import settings
+    a = service._rng("ODI", 5, 0).random()
+    monkeypatch.setattr(settings, "xi_secret", "something-else")
+    assert service._rng("ODI", 5, 0).random() != a
+
+
+def test_unrevealed_spins_never_reach_the_browser(client):
+    d = draft(client, format="ODI", seed=77)
+    assert d["revealed"] == 0 and d["spins"] == []
+    hidden = server_spins("ODI", 77)
+    d = client.post(f"{X}/drafts/{d['id']}/spin").json()
+    assert d["revealed"] == 1 and len(d["spins"]) == 1
+    shown = {c["id"] for c in d["spins"][0]["candidates"]}
+    secret = {c["id"] for s in hidden[1:] for c in s["candidates"]} - shown
+    body = json.dumps(d)
+    assert not any(pid in body for pid in secret)
+    # No second spin until the first has a pick; no picks from spins not yet out.
+    assert client.post(f"{X}/drafts/{d['id']}/spin").status_code == 409
+    other = hidden[1]["candidates"][0]["id"]
+    r = client.post(f"{X}/drafts/{d['id']}/pick", json={"spin": 2, "player": other})
+    assert r.status_code == 422 and "revealed" in r.json()["detail"]
+    # The endpoints that handed out whole draws are gone.
+    assert client.post(f"{X}/spin", json={"format": "ODI", "seed": 77}).status_code in (404, 405)
+    assert client.get(f"{X}/daily/ODI").status_code in (404, 405)
+    assert client.post(f"{X}/series", json={}).status_code in (404, 405)
+
+
+def test_draft_to_series(client):
+    d = fill(client, draft(client, format="IPL", seed=99))
+    assert d["status"]["ready"] and not d["can_spin"]
+    assert [p["slot"] for p in d["lineup"]] == list(range(1, 12))
+    assert all(p["player"] for p in d["lineup"])
+    # Same draft id, same lineup, same slug; the draft is then closed.
+    a = client.post(f"{X}/drafts/{d['id']}/play").json()
+    assert client.post(f"{X}/drafts/{d['id']}/play").json()["slug"] == a["slug"]
+    assert client.post(f"{X}/drafts/{d['id']}/spin").status_code == 409
+    c = client.get(f"{X}/challenge/{a['slug']}").json()
+    assert "spins" not in c and len(c["picks"]) == 11 and sorted(c["slots"]) == list(range(1, 12))
+    assert [p["name"] for p in c["xi"]] == [p["player"]["name"] for p in d["lineup"]]
+    r = c["result"]
+    assert r["won"] + r["lost"] + r["drawn"] + r["tied"] == 5
+    m = client.get(f"{X}/challenge/{a['slug']}/match/1").json()
+    assert m["commentary"] and len(m["innings"]) == 2
+    # A friend chasing it gets the same draw and the rival recorded.
+    f = draft(client, format="IPL", seed=99, vs=a["slug"])
+    assert f["rival"] == a["slug"] and f["id"] != d["id"]
+
+
+def test_moves_follow_the_rules(client):
+    d = fill(client, draft(client, format="Test", seed=5))
+    by = {p["slot"]: p for p in d["lineup"]}
+    src = next(p for p in d["lineup"] if p["targets"])
+    dst = src["targets"][0]
+    moved = client.post(f"{X}/drafts/{d['id']}/move", json={"from": src["slot"], "to": dst}).json()
+    after = {p["slot"]: p for p in moved["lineup"]}
+    assert after[dst]["player"]["id"] == src["player"]["id"]
+    assert after[src["slot"]]["player"]["id"] == by[dst]["player"]["id"]
+    # A bowler can't open.
+    bowler = next(p for p in moved["lineup"] if p["slot"] == 11)
+    r = client.post(f"{X}/drafts/{d['id']}/move", json={"from": bowler["slot"], "to": 1})
+    assert r.status_code == 422
+    # Removing a pick reopens its spin.
+    gone = client.delete(f"{X}/drafts/{d['id']}/pick/{bowler['spin']}").json()
+    assert gone["status"]["picked"] == 10 and not gone["status"]["ready"]
+
+
+def test_daily_and_errors(client):
+    d = draft(client, format="T20I", daily=True)
+    assert d["seed"] == service.daily_seed("T20I", date.fromisoformat(d["daily"]))
+    assert client.get(f"{X}/drafts/nope").status_code == 404
+    assert client.get(f"{X}/challenge/nope").status_code == 404
+    assert client.post(f"{X}/drafts", json={"format": "Hundred"}).status_code == 422
+    r = client.post(f"{X}/drafts/{d['id']}/play")
+    assert r.status_code == 422
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
@@ -55,61 +154,3 @@ def test_world_xis_obey_the_draft_rules(client, fmt):
                 rows.append({"person": pid, "role": r["role"], "country": r["country"]})
         service.check_rules(fmt, rows)
         assert len(prof) == 11 and cfg["keeper"] in cfg["players"]
-
-
-def test_series_is_deterministic_saved_and_shareable(client):
-    s = spin(client, "IPL", 99)
-    picks = auto_draft(s, 4)
-    a = client.post("/api/v1/xi/series", json={"format": "IPL", "seed": 99, "picks": picks}).json()
-    b = client.post("/api/v1/xi/series", json={"format": "IPL", "seed": 99, "picks": picks}).json()
-    assert a["slug"] == b["slug"] and a["result"] == b["result"] and a["matches"] == b["matches"]
-    r = a["result"]
-    assert r["won"] + r["lost"] + r["drawn"] + r["tied"] == 5
-    saved = client.get(f"/api/v1/xi/challenge/{a['slug']}").json()
-    assert saved["picks"] == picks and saved["spins"] == s and saved["result"] == r
-    m = client.get(f"/api/v1/xi/challenge/{a['slug']}/match/1").json()
-    assert m["commentary"] and len(m["innings"]) == 2
-
-
-def test_test_series_runs(client):
-    s = spin(client, "Test", 5)
-    out = client.post("/api/v1/xi/series", json={"format": "Test", "seed": 5, "picks": auto_draft(s)}).json()
-    assert out["opponent"] == "All-time Test XI"
-    assert all(2 <= len(m["scores"]) <= 4 for m in out["matches"])
-
-
-def test_draft_rules_are_enforced(client):
-    s = spin(client, "ODI", 11)
-    picks = auto_draft(s)
-    bad = picks[:]
-    bad[0] = "not-a-player"
-    r = client.post("/api/v1/xi/series", json={"format": "ODI", "seed": 11, "picks": bad})
-    assert r.status_code == 422 and "isn't on the" in r.json()["detail"]
-    r = client.post("/api/v1/xi/series", json={"format": "ODI", "seed": 11, "picks": picks[:10]})
-    assert r.status_code == 422
-
-
-def test_rules_unit():
-    ok = [{"person": str(i), "role": r, "country": "India"}
-          for i, r in enumerate(["BAT"] * 5 + ["WK"] + ["BOWL"] * 5)]
-    service.check_rules("IPL", ok)
-    with pytest.raises(service.DraftError, match="wicketkeeper"):
-        service.check_rules("ODI", [dict(r, role="BAT") if r["role"] == "WK" else r for r in ok])
-    with pytest.raises(service.DraftError, match="five bowling"):
-        service.check_rules("ODI", [dict(r, role="BAT") if i == 6 else r for i, r in enumerate(ok)])
-    with pytest.raises(service.DraftError, match="twice"):
-        service.check_rules("ODI", ok[:10] + [dict(ok[0])])
-    os5 = [dict(r, country="Australia") if i < 5 else r for i, r in enumerate(ok)]
-    with pytest.raises(service.DraftError, match="overseas"):
-        service.check_rules("IPL", os5)
-    service.check_rules("ODI", os5)                              # overseas cap is IPL-only
-
-
-def test_daily_and_errors(client):
-    d = client.get("/api/v1/xi/daily/T20I").json()
-    assert d["seed"] == service.daily_seed("T20I", date.fromisoformat(d["date"]))
-    r = client.post("/api/v1/xi/series", json={"format": "T20I", "seed": (d["seed"] + 1) % 2**32,
-                                                "daily": True, "picks": auto_draft(d["spins"])})
-    assert r.status_code == 422 and "daily" in r.json()["detail"]
-    assert client.get("/api/v1/xi/challenge/nope").status_code == 404
-    assert client.post("/api/v1/xi/spin", json={"format": "Hundred"}).status_code == 422

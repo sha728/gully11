@@ -20,11 +20,23 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .commentary import describe
-from .profiles import Profile, expected
+from .profiles import WICKET_ROLES, Profile, expected
 from .rates import RUNS, Env, load_env
 
 CREDITED = {"caught", "bowled", "lbw", "caught and bowled", "stumped", "hit wicket"}
 RUN_OUT_NON_STRIKER = 0.4  # share of run outs that dismiss the non-striker
+# A batter with a real bowling record (wickets in this format) gets a one-over
+# "captain's hunch" in the middle overs this often per limited-overs innings.
+PART_TIMER_CHANCE = 0.1
+PART_TIMER_MIN_WICKETS = 10
+
+
+def _coverable(quota: dict[str, int], overs: int, last: str) -> bool:
+    """Can these quotas bowl ``overs`` more overs, never the same bowler twice in a
+    row, when ``last`` bowled the over just gone? Nobody can bowl more than every
+    other over: ceil(n/2) of n, or floor(n/2) for the bowler who has just bowled."""
+    cap = {b: (overs // 2 if b == last else (overs + 1) // 2) for b in quota}
+    return sum(min(max(q, 0), cap[b]) for b, q in quota.items()) >= overs
 
 
 @dataclass
@@ -155,6 +167,11 @@ def _pick(rng: random.Random, probs) -> int:
     return len(probs) - 1
 
 
+def _n(count: int, word: str) -> str:
+    """'1 run', '2 runs'."""
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
 def _phi(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
@@ -247,6 +264,17 @@ class _Match:
             keeper = team.keeper_id()
             eligible = [p.id for p in team.players + team.impact
                         if p.id not in (last, keeper) and left[p.id] > 0]
+        elif not env.is_test:
+            # Plan the rest of the innings: prefer bowlers who leave the specialists
+            # (bowlers and all-rounders) able to bowl out the remaining overs, so a
+            # batter only turns his arm over when the specialists can't.
+            main = [b for b in options if by_id[b].role in WICKET_ROLES]
+            for pool in (main, options):
+                ok = [b for b in eligible if b in pool
+                      and _coverable({o: left[o] - (o == b) for o in pool}, overs_left - 1, b)]
+                if ok:
+                    eligible = ok
+                    break
 
         def value(pid: str, ph: str) -> float:
             p = by_id[pid]
@@ -306,11 +334,23 @@ class _Match:
             return (inn.wickets >= 10 or inn.legal_balls >= n_balls
                     or (target is not None and inn.runs >= target))
 
+        # Luck: now and then the captain gives a batter who can bowl a middle over.
+        hunch, hunch_over, announced = None, -1, False
+        if not env.is_test:
+            arms = [p.id for p in bowl_team.players
+                    if p.role not in WICKET_ROLES and p.id != keeper and p.wickets >= PART_TIMER_MIN_WICKETS]
+            middle = [o for o in range(max_overs) if env.phase(o) == "middle"]
+            if arms and middle and rng.random() < PART_TIMER_CHANCE:
+                hunch, hunch_over = rng.choice(arms), rng.choice(middle)
+
         for over in range(max_overs):
             if done():
                 break
             phase = env.phase(over)
-            bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
+            if over == hunch_over and hunch != last_bowler and left[hunch] > 0:
+                bid = hunch
+            else:
+                bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
             bowler = by_id[bid]
             bl = inn.bowl[bid]
             legal_in_over, runs_in_over = 0, 0
@@ -399,6 +439,9 @@ class _Match:
                 event["score"] = f"{inn.runs}/{inn.wickets}"
                 if self.with_commentary:
                     event["text"] = describe(event, len(self.commentary))
+                    if bid == hunch and not announced:
+                        announced = True
+                        event["text"] = f"Captain's hunch: {bowler.name} has a bowl. " + event["text"]
                     self.commentary.append(event)
                     if not env.is_test:
                         self.win_prob.append(
@@ -487,9 +530,9 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
 
     if i2.runs > i1.runs:
         balls_left = env.overs * 6 - i2.legal_balls
-        winner, margin = second.name, f"won by {10 - i2.wickets} wickets ({balls_left} balls left)"
+        winner, margin = second.name, f"won by {_n(10 - i2.wickets, 'wicket')} ({_n(balls_left, 'ball')} left)"
     elif i1.runs > i2.runs:
-        winner, margin = first.name, f"won by {i1.runs - i2.runs} runs"
+        winner, margin = first.name, f"won by {_n(i1.runs - i2.runs, 'run')}"
     else:
         winner, margin = None, "match tied"
     return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name),
@@ -578,18 +621,18 @@ def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
     need = totals[third.name] - totals[fourth.name] + 1
     if need <= 0:
         # The side batting third is still behind: beaten by an innings.
-        return won(fourth, f"won by an innings and {1 - need} runs")
+        return won(fourth, f"won by an innings and {_n(1 - need, 'run')}")
     if left <= 0:
         return draw()
 
     i4 = m.innings(fourth, third, 4, need, max_overs=left)
     innings.append(i4)
     if i4.runs >= need:
-        return won(fourth, f"won by {10 - i4.wickets} wickets")
+        return won(fourth, f"won by {_n(10 - i4.wickets, 'wicket')}")
     if i4.wickets >= 10:
         if i4.runs == need - 1:
             return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
                                winner=None, margin="match tied", commentary=m.commentary,
                                win_prob=[], result="tie")
-        return won(third, f"won by {need - 1 - i4.runs} runs")
+        return won(third, f"won by {_n(need - 1 - i4.runs, 'run')}")
     return draw()

@@ -35,6 +35,7 @@ TABLES = {
     "player_venue_stats": "SELECT * FROM player_venue_stats",
     "legends": "SELECT * FROM legends",
     "player_teams": "SELECT * FROM player_teams",
+    "player_opening": "SELECT * FROM player_opening",
 }
 
 

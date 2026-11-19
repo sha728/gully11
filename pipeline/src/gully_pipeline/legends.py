@@ -50,7 +50,7 @@ COLUMNS = [
     "name", "country", "format", "matches", "runs", "bat_avg", "bat_sr", "hundreds",
     "fifties", "highest", "highest_not_out", "balls_bowled", "wickets", "bowl_avg",
     "bowl_econ", "bowl_sr", "best_bowling", "catches", "stumpings", "role", "role_source",
-    "batting_hand", "bowling_arm", "bowling_type", "bowling_style_raw", "role_raw",
+    "batting_hand", "bowling_arm", "bowling_type", "bowling_style_raw", "role_raw", "opener",
     "format_start", "format_end", "era_start", "era_end", "stats_as_of",
     "source", "source_url", "derived_fields",
 ]
@@ -266,7 +266,9 @@ def build_legends(seed: Path = SEED_CSV, out: Path = LEGENDS_CSV) -> list[dict]:
                                s.get("role_override") or None)
         if not player_rows:
             raise SystemExit(f"No Test/ODI columns in infobox: {s['wikipedia_title']}")
-        rows += player_rows
+        # Infoboxes rarely say who opened; the seed marks it by hand.
+        opener = (s.get("opener") or "").strip().lower() == "true"
+        rows += [{**r, "opener": opener} for r in player_rows]
     with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS, lineterminator="\n")
         w.writeheader()

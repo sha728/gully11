@@ -508,6 +508,10 @@ ORDER BY player_id, format, phase, role;
 # share of team balls bowled / faced across every match the player appears in.
 BOWL_SHARE_MIN = 0.08
 BAT_SHARE_AR_MIN = 0.07
+# Spin vs pace: pacers almost never get stumpings (Anderson, Starc, Steyn, Bumrah: 0),
+# spinners get 4-8% of their wickets that way. Too few wickets: unknown.
+SPIN_MIN_WICKETS = 10
+SPIN_STUMPED_SHARE = 0.02
 
 PLAYERS_SQL = f"""
 CREATE OR REPLACE TABLE players AS
@@ -543,6 +547,13 @@ share AS (
     WHERE mp.player_id IS NOT NULL
     GROUP BY 1
 ),
+spin AS (
+    -- Stumpings happen off slow bowling; a bowler with a share of them is a spinner.
+    SELECT bowler_id AS pid,
+           count(*) FILTER (WHERE is_wicket AND bowler_credited) AS wk,
+           count(*) FILTER (WHERE wicket_kind = 'stumped') AS st
+    FROM d WHERE is_legal OR wicket_kind = 'stumped' GROUP BY 1
+),
 stumps AS (
     SELECT fielder_id AS pid, count(*) AS n FROM d
     WHERE wicket_kind = 'stumped' AND NOT coalesce(fielder_is_sub, false)
@@ -576,7 +587,9 @@ SELECT s.pid AS id,
            ELSE 'BAT'
        END AS role,
        NULL::VARCHAR AS batting_hand,
-       NULL::VARCHAR AS bowling_style,
+       CASE WHEN coalesce(sp.wk, 0) < {SPIN_MIN_WICKETS} THEN NULL
+            WHEN sp.st >= 1 AND sp.st >= {SPIN_STUMPED_SHARE} * sp.wk THEN 'spin'
+            ELSE 'pace' END AS bowling_style,
        CASE WHEN i.country IS NULL THEN NULL ELSE i.country <> 'India' END AS is_overseas_for_ipl,
        c.pid IS NOT NULL AS capped,
        s.era_start::INTEGER AS era_start,
@@ -589,6 +602,7 @@ FROM share s
 LEFT JOIN people p ON p.identifier = s.pid
 LEFT JOIN wd ON wd.cricinfo_id = p.key_cricinfo
 LEFT JOIN stumps st ON st.pid = s.pid
+LEFT JOIN spin sp ON sp.pid = s.pid
 LEFT JOIN intl i ON i.pid = s.pid
 LEFT JOIN capped c ON c.pid = s.pid
 ORDER BY s.pid;
@@ -733,7 +747,7 @@ SELECT l.id, (SELECT p.id FROM players p WHERE p.full_name = l.name AND p.countr
        l.bat_sr, l.hundreds::INTEGER AS hundreds, l.fifties::INTEGER AS fifties, l.highest::INTEGER AS highest,
        l.balls_bowled::INTEGER AS balls_bowled, l.wickets::INTEGER AS wickets, l.bowl_avg, l.bowl_econ,
        l.bowl_sr, l.best_bowling, l.catches::INTEGER AS catches, l.stumpings::INTEGER AS stumpings,
-       l.role, l.batting_hand, l.bowling_arm, l.bowling_type,
+       l.role, l.batting_hand, l.bowling_arm, l.bowling_type, coalesce(l.opener, false) AS opener,
        l.format_start::INTEGER AS format_start, l.format_end::INTEGER AS format_end,
        l.era_start::INTEGER AS era_start, l.era_end::INTEGER AS era_end, l.source_url
 FROM l ORDER BY l.name, l.format;
@@ -748,6 +762,28 @@ SELECT mp.player_id, f.format, f.season, mp.team, count(DISTINCT mp.match_id)::I
 FROM mp JOIN match_formats f USING (match_id)
 WHERE mp.player_id IS NOT NULL
 GROUP BY ALL ORDER BY player_id, format, season;
+"""
+
+OPENING_SQL = """
+-- Innings a player batted in, per format, and how many he opened (on strike or at
+-- the other end for the first ball). Cricsheet has no batting positions, but this
+-- is exact for openers.
+CREATE OR REPLACE TABLE player_opening AS
+WITH opening_ball AS (
+    SELECT match_id, innings,
+           arg_min(batter_id, over * 100 + ball_in_over) AS b,
+           arg_min(non_striker_id, over * 100 + ball_in_over) AS ns
+    FROM d GROUP BY ALL
+),
+apps AS (
+    SELECT DISTINCT match_id, innings, batter_id AS pid FROM d
+    UNION SELECT DISTINCT match_id, innings, non_striker_id FROM d
+)
+SELECT a.pid AS player_id, f.format, count(*)::INTEGER AS innings,
+       count(*) FILTER (WHERE a.pid IN (x.b, x.ns))::INTEGER AS opened
+FROM apps a JOIN opening_ball x USING (match_id, innings) JOIN match_formats f USING (match_id)
+WHERE a.pid IS NOT NULL AND a.pid IN (SELECT id FROM players)
+GROUP BY ALL ORDER BY player_id, format;
 """
 
 
@@ -789,7 +825,8 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         con.execute(venues_sql())
         con.execute(legends_sql(Path(__file__).resolve().parents[2] / "reference" / "legends.csv"))
         con.execute(PLAYER_TEAMS_SQL)
+        con.execute(OPENING_SQL)
         tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats",
                   "player_phase_form", "league_strength", "venues", "venue_format_stats",
-                  "player_dismissals", "player_venue_stats", "legends", "player_teams"]
+                  "player_dismissals", "player_venue_stats", "legends", "player_teams", "player_opening"]
         return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}

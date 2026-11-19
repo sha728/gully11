@@ -7,13 +7,13 @@ import { XI_COPY, XI_FORMATS } from "@/lib/xi";
 
 export const metadata: Metadata = {
   title: "XI Builder",
-  description: "Spin for an era and a nation, draft an XI, then play five matches against an all-time World XI.",
+  description: "Spin for an era and a nation, draft an XI, then play five matches against the Greats.",
 };
 
 const STEPS = [
   ["Spin", "Hit spin eleven times. Each lands on a decade and a nation, or an IPL franchise and era."],
   ["Draft", "Take one player per spin and set the batting order: openers at the top, the keeper in the top six, spinners and all-rounders at 7–8, bowlers at the tail."],
-  ["Play", "Five matches against a World XI on the same ball-by-ball engine as the rest of the site."],
+  ["Play", "Watch five matches against the Greats, ball by ball, on the same engine as the rest of the site."],
 ] as const;
 
 export default function XIPage() {
@@ -21,7 +21,7 @@ export default function XIPage() {
     <div className="space-y-14">
       <PageHeader
         kicker="XI Builder · same spins for everyone each day"
-        title={<>Beat the <span className="text-signal">World XI.</span></>}
+        title={<>Take on <span className="text-signal">the Greats.</span></>}
         sub="Draft across eras: 1990s Pakistan for one slot, 2010s Australia for the next. Legends from before 2001 come from their career records."
       />
 

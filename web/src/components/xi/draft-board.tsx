@@ -120,7 +120,8 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
     setError(null);
     try {
       const res = await xiApi.play(d.id);
-      router.push(`/xi/c/${res.slug}${res.rival ? `?vs=${res.rival}` : ""}`);
+      // Straight into match day: the series plays out live, one match at a time.
+      router.push(`/xi/c/${res.slug}/match/1?live=1${res.rival ? `&vs=${res.rival}` : ""}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't play the series.");
       setBusy(false);
@@ -141,7 +142,7 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
         </div>
         {rival && (
           <div className="border-l-2 border-signal pl-3">
-            <div className="label">Beat this</div>
+            <div className="label">Score to top</div>
             <div className="font-display text-2xl font-bold uppercase">{rival.result.verdict}</div>
           </div>
         )}
@@ -334,7 +335,7 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
       <div className="sticky bottom-0 z-20 -mx-4 flex flex-wrap items-center gap-4 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
         <div className="min-w-0 flex-1 text-sm">
           {error ? <span className="text-destructive">{error}</span>
-            : status.ready ? <span>Ready. Five matches against the {format === "IPL" ? "IPL All-Stars" : `${XI_COPY[format].title} World XI`}.</span>
+            : status.ready ? <span>Ready. Five matches against the {XI_COPY[format].title} Greats.</span>
             : <span className="text-muted-foreground">
                 {d.waiting && latest && !latest.pick ? "Pick a player from this spin, then spin again."
                   : status.picked < 11 ? `${11 - status.picked} to pick.`

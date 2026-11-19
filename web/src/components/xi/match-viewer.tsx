@@ -1,173 +1,324 @@
 "use client";
 
-import { ArrowCounterClockwiseIcon, PauseIcon, PlayIcon, SkipForwardIcon } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowCounterClockwiseIcon, ArrowRightIcon, FastForwardIcon, PauseIcon, PlayIcon, SkipForwardIcon,
+} from "@phosphor-icons/react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { glyph, keyMoments, liveState, overEnds, type LiveState, type Moment } from "@/lib/replay";
 import { cn } from "@/lib/utils";
-import type { BallEvent, FullMatch, InningsCard } from "@/lib/xi";
+import type { BallEvent, Challenge, FullMatch, InningsCard } from "@/lib/xi";
 
 const YOU = "Your XI";
-const who = (team: string) => (team === YOU ? "You" : "World XI");
+const BALLS: Record<string, number | null> = { Test: null, ODI: 300, T20I: 120, IPL: 120 };
+const SPEEDS = [{ label: "1×", ms: 700 }, { label: "4×", ms: 175 }, { label: "16×", ms: 45 }, { label: "64×", ms: 12 }];
 
-export function MatchViewer({ match, isTest }: { match: FullMatch; isTest: boolean }) {
+/** "You" for your side, the opponent's short name ("Greats") for theirs. */
+function useWho(opponent: string) {
+  const short = opponent.replace(/^(Test|ODI|T20I|IPL) /, "").replace(/^All-time /, "");
+  return (team: string) => (team === YOU ? "You" : short);
+}
+
+function isBoundary(e: BallEvent) {
+  return e.kind !== "wicket" && (e.bat_runs === 4 || e.bat_runs === 6);
+}
+
+/** The whole match page below the back link: header, replay and the cards.
+ * ``live``: the series is being played for the first time, so nothing about the
+ * result shows until the last ball (or "Skip to result"). */
+export function MatchDay({ challenge, match, n, live, vs, summary }: {
+  challenge: Challenge; match: FullMatch; n: number; live: boolean; vs?: string; summary: React.ReactNode;
+}) {
+  const isTest = challenge.format === "Test";
+  const balls = match.commentary;
+  const who = useWho(challenge.opponent);
+  const [cursor, setCursor] = useState(live ? 0 : balls.length);
+  const [playing, setPlaying] = useState(live);
+  const [speed, setSpeed] = useState(isTest ? 3 : 1);
+  const revealed = !live || cursor >= balls.length;
+
+  useEffect(() => {
+    if (!playing) return;
+    if (cursor >= balls.length) { setPlaying(false); return; }
+    const t = setTimeout(() => setCursor((c) => c + 1), SPEEDS[speed].ms);
+    return () => clearTimeout(t);
+  }, [playing, cursor, speed, balls.length]);
+
+  const youWon = match.winner === YOU;
+  const headline = match.result === "draw" ? "Match drawn" : match.result === "tie" ? "Match tied"
+    : `${who(match.winner ?? "")} ${match.margin}`;
+  const before = challenge.matches.slice(0, n - 1);
+  const sofar = (upto: typeof before) => {
+    const w = upto.filter((m) => m.winner === YOU).length;
+    const l = upto.filter((m) => m.result === "win" && m.winner !== YOU).length;
+    return `${w}–${l}`;
+  };
+  const q = (extra: string) => `?${[live ? "live=1" : "", vs ? `vs=${vs}` : "", extra].filter(Boolean).join("&")}`;
+  const nextHref = n < 5 ? `/xi/c/${challenge.slug}/match/${n + 1}${q("")}` : `/xi/c/${challenge.slug}${vs ? `?vs=${vs}` : ""}`;
+
   return (
-    <Tabs defaultValue="replay" className="gap-6">
-      <TabsList variant="line" className="w-full justify-start border-b">
-        <TabsTrigger value="replay" className="font-mono text-xs uppercase">Ball by ball</TabsTrigger>
-        <TabsTrigger value="card" className="font-mono text-xs uppercase">Scorecard</TabsTrigger>
-        {!isTest && <TabsTrigger value="worm" className="font-mono text-xs uppercase">Worm</TabsTrigger>}
-      </TabsList>
-      <TabsContent value="replay"><Replay match={match} isTest={isTest} /></TabsContent>
-      <TabsContent value="card" className="space-y-12">
-        {match.innings.map((inn, i) => <InningsTable key={i} inn={inn} n={i + 1} isTest={isTest} />)}
-      </TabsContent>
-      {!isTest && <TabsContent value="worm"><Worm match={match} /></TabsContent>}
-    </Tabs>
+    <div className="space-y-8">
+      <div>
+        <div className="label mt-4 mb-2">
+          Match {n} of 5 · v {challenge.opponent}
+          {live && <> · series {sofar(before)}</>}
+        </div>
+        {revealed ? (
+          <h1 className={cn("font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl", youWon && "text-signal")}>{headline}</h1>
+        ) : (
+          <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">
+            You <span className="text-muted-foreground">v</span> {who("")}
+            <span className="ml-3 inline-block translate-y-[-0.35em] bg-signal px-2 py-0.5 align-middle font-mono text-xs tracking-widest text-signal-foreground">LIVE</span>
+          </h1>
+        )}
+        <div className="seam mt-5" aria-hidden />
+      </div>
+
+      {revealed && live && (
+        <div className="flex flex-wrap items-center gap-4 border-l-2 border-signal pl-4">
+          <div>
+            <div className="label">Series after match {n}</div>
+            <div className="font-display text-3xl font-black tnum">{sofar(challenge.matches.slice(0, n))}</div>
+          </div>
+          <Button asChild size="lg" className="ml-auto font-mono uppercase">
+            <Link href={nextHref}>{n < 5 ? <>Match {n + 1}<ArrowRightIcon /></> : <>The series verdict<ArrowRightIcon /></>}</Link>
+          </Button>
+        </div>
+      )}
+
+      {revealed && summary}
+
+      <Tabs defaultValue="replay" className="gap-6">
+        <TabsList variant="line" className="w-full justify-start border-b">
+          <TabsTrigger value="replay" className="font-mono text-xs uppercase">Ball by ball</TabsTrigger>
+          {revealed && <TabsTrigger value="card" className="font-mono text-xs uppercase">Scorecard</TabsTrigger>}
+          {revealed && !isTest && <TabsTrigger value="worm" className="font-mono text-xs uppercase">Worm</TabsTrigger>}
+        </TabsList>
+        <TabsContent value="replay">
+          <Replay match={match} isTest={isTest} ballsPerInnings={BALLS[challenge.format]} who={who} live={live}
+            cursor={cursor} setCursor={setCursor} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} />
+        </TabsContent>
+        {revealed && (
+          <TabsContent value="card" className="space-y-12">
+            {match.innings.map((inn, i) => <InningsTable key={i} inn={inn} n={i + 1} isTest={isTest} who={who} />)}
+          </TabsContent>
+        )}
+        {revealed && !isTest && <TabsContent value="worm"><Worm match={match} who={who} /></TabsContent>}
+      </Tabs>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------- replay
 
 type Filter = "all" | "wickets" | "boundaries";
-const SPEEDS = [{ label: "1×", ms: 700 }, { label: "4×", ms: 175 }, { label: "16×", ms: 45 }];
 
-function isBoundary(e: BallEvent) {
-  return e.kind !== "wicket" && (e.bat_runs === 4 || e.bat_runs === 6);
-}
-
-function Replay({ match, isTest }: { match: FullMatch; isTest: boolean }) {
+function Replay({ match, isTest, ballsPerInnings, who, live, cursor, setCursor, playing, setPlaying, speed, setSpeed }: {
+  match: FullMatch; isTest: boolean; ballsPerInnings: number | null; who: (t: string) => string; live: boolean;
+  cursor: number; setCursor: (f: number | ((c: number) => number)) => void;
+  playing: boolean; setPlaying: (f: boolean | ((p: boolean) => boolean)) => void;
+  speed: number; setSpeed: (s: number) => void;
+}) {
   const balls = match.commentary;
-  const [cursor, setCursor] = useState(balls.length);   // start with the whole match shown
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
   const [filter, setFilter] = useState<Filter>("all");
+  const state = useMemo(() => liveState(match, cursor, ballsPerInnings), [match, cursor, ballsPerInnings]);
+  const moments = useMemo(() => keyMoments(match, isTest), [match, isTest]);
+  const ends = useMemo(() => overEnds(match), [match]);
+  const done = cursor >= balls.length;
+  // In a live match only what has happened is listed; afterwards, every moment.
+  const seen = moments.filter((m) => m.at <= cursor);
+  const upcoming = moments.find((m) => m.at > cursor);
 
-  useEffect(() => {
-    if (!playing) return;
-    if (cursor >= balls.length) {
-      setPlaying(false);
-      return;
-    }
-    const t = setTimeout(() => setCursor((c) => c + 1), SPEEDS[speed].ms);
-    return () => clearTimeout(t);
-  }, [playing, cursor, speed, balls.length]);
-
-  const shown = balls.slice(0, cursor);
-  const now = shown[shown.length - 1];
   const feed = useMemo(() => {
-    const keep = shown.filter((e) => filter === "all" || (filter === "wickets" ? e.kind === "wicket" : isBoundary(e)));
-    return keep.slice(-250).reverse();     // newest first; the full match can be thousands of balls in a Test
-  }, [shown, filter]);
-  const innings = match.innings;
-  const curInns = now?.inns ?? 1;
-  const winProb = !isTest && match.win_prob.length ? match.win_prob[Math.max(0, cursor - 1)]?.[1] : null;
-  const firstBatting = innings[0]?.batting;
-  const youFirst = firstBatting === YOU;
+    const rows: ({ type: "ball"; e: BallEvent; i: number } | { type: "over"; text: string; i: number })[] = [];
+    const from = Math.max(0, cursor - 300);    // a Test can run to thousands of balls
+    for (let i = from; i < cursor; i++) {
+      const e = balls[i];
+      if (filter === "all" || (filter === "wickets" ? e.kind === "wicket" : isBoundary(e))) rows.push({ type: "ball", e, i });
+      if (filter === "all" && ends.has(i)) rows.push({ type: "over", text: ends.get(i)!, i });
+    }
+    return rows.reverse();
+  }, [balls, cursor, filter, ends]);
+
+  const winProb = !isTest && match.win_prob.length && cursor > 0 ? match.win_prob[cursor - 1]?.[1] : null;
+  const firstBatting = match.innings[0]?.batting;
+
+  const jump = (to: number) => { setPlaying(false); setCursor(to); };
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="min-w-0 space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          {cursor >= balls.length && !playing ? (
-            <Button onClick={() => { setCursor(0); setPlaying(true); }} className="font-mono uppercase">
-              <PlayIcon weight="fill" />Watch from the first ball
-            </Button>
-          ) : (
-            <Button onClick={() => setPlaying((p) => !p)} className="font-mono uppercase">
-              {playing ? <><PauseIcon weight="fill" />Pause</> : <><PlayIcon weight="fill" />Play</>}
-            </Button>
-          )}
-          <ToggleGroup type="single" value={String(speed)} onValueChange={(v) => v && setSpeed(Number(v))} variant="outline" size="sm">
-            {SPEEDS.map((s, i) => <ToggleGroupItem key={s.label} value={String(i)} className="font-mono text-[11px]">{s.label}</ToggleGroupItem>)}
-          </ToggleGroup>
-          <Button variant="ghost" size="sm" onClick={() => { setPlaying(false); setCursor(balls.length); }}>
-            <SkipForwardIcon />End
+    <div className="space-y-5">
+      <Board state={state} who={who} isTest={isTest} winProb={winProb ?? null} firstBatting={firstBatting} />
+
+      <div className="flex flex-wrap items-center gap-2">
+        {done && !playing ? (
+          <Button onClick={() => { setCursor(0); setPlaying(true); }} className="font-mono uppercase">
+            <PlayIcon weight="fill" />{cursor === 0 ? "Start" : "Watch from the first ball"}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => { setPlaying(false); setCursor(0); }}>
-            <ArrowCounterClockwiseIcon />Reset
+        ) : (
+          <Button onClick={() => setPlaying((p) => !p)} className="font-mono uppercase">
+            {playing ? <><PauseIcon weight="fill" />Pause</> : <><PlayIcon weight="fill" />Play</>}
           </Button>
-          <ToggleGroup type="single" value={filter} onValueChange={(v) => v && setFilter(v as Filter)} variant="outline" size="sm" className="ml-auto">
+        )}
+        <ToggleGroup type="single" value={String(speed)} onValueChange={(v) => v && setSpeed(Number(v))} variant="outline" size="sm" aria-label="Speed">
+          {SPEEDS.map((s, i) => <ToggleGroupItem key={s.label} value={String(i)} className="font-mono text-[11px]">{s.label}</ToggleGroupItem>)}
+        </ToggleGroup>
+        <Button variant="outline" size="sm" disabled={!upcoming} onClick={() => upcoming && jump(upcoming.at)}>
+          <FastForwardIcon />Next moment
+        </Button>
+        <Button variant="ghost" size="sm" disabled={done} onClick={() => jump(balls.length)}>
+          <SkipForwardIcon />{live ? "Skip to result" : "End"}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => jump(0)}>
+          <ArrowCounterClockwiseIcon />Restart
+        </Button>
+      </div>
+
+      <input type="range" min={0} max={balls.length} value={cursor} aria-label="Position in the match"
+        onChange={(e) => jump(Number(e.target.value))}
+        className="h-1 w-full cursor-pointer accent-[var(--signal)]" />
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="min-w-0 space-y-3">
+          <ToggleGroup type="single" value={filter} onValueChange={(v) => v && setFilter(v as Filter)} variant="outline" size="sm">
             <ToggleGroupItem value="all" className="font-mono text-[11px] uppercase">All</ToggleGroupItem>
             <ToggleGroupItem value="wickets" className="font-mono text-[11px] uppercase">Wickets</ToggleGroupItem>
             <ToggleGroupItem value="boundaries" className="font-mono text-[11px] uppercase">4s & 6s</ToggleGroupItem>
           </ToggleGroup>
+          <ol className="max-h-[32rem] divide-y overflow-y-auto border-y" aria-live={playing ? "off" : "polite"}>
+            {feed.length === 0 && <li className="py-6 text-center text-sm text-muted-foreground">{cursor === 0 ? "Waiting for the first ball." : "Nothing yet."}</li>}
+            {feed.map((row, k) => row.type === "over" ? (
+              <li key={`o${row.i}`} className="bg-muted/50 px-2 py-1.5 font-mono text-[11px] text-muted-foreground uppercase">{row.text}</li>
+            ) : (
+              <li key={`b${row.i}`} className={cn("flex gap-3 py-2 text-sm", k === 0 && playing && "animate-in fade-in slide-in-from-top-1",
+                row.e.text.startsWith("Captain's hunch") && "bg-signal/5")}>
+                <span className="w-14 shrink-0 font-mono text-[11px] text-muted-foreground tnum">
+                  {isTest ? `${row.e.inns}·` : ""}{row.e.ball}
+                </span>
+                <span className={cn("w-8 shrink-0 text-center font-display text-lg leading-5 font-bold",
+                  row.e.kind === "wicket" ? "bg-signal text-signal-foreground" : isBoundary(row.e) ? "text-signal" : "text-muted-foreground")}>
+                  {glyph(row.e)}
+                </span>
+                <span className={cn("min-w-0 flex-1", row.e.kind === "wicket" && "font-semibold")}>
+                  {row.e.text.replace(/^Captain's hunch: [^.]+\. /, "").replace(/^\S+ /, "")}
+                  {row.e.text.startsWith("Captain's hunch") && <span className="ml-2 font-mono text-[10px] text-signal uppercase">captain&apos;s hunch</span>}
+                </span>
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground tnum">{row.e.score}</span>
+              </li>
+            ))}
+          </ol>
         </div>
-
-        {/* scrubber */}
-        <input type="range" min={0} max={balls.length} value={cursor} aria-label="Position in the match"
-          onChange={(e) => { setPlaying(false); setCursor(Number(e.target.value)); }}
-          className="h-1 w-full cursor-pointer accent-[var(--signal)]" />
-
-        <ol className="max-h-[32rem] divide-y overflow-y-auto border-y" aria-live="polite">
-          {feed.length === 0 && <li className="py-6 text-center text-sm text-muted-foreground">Nothing yet.</li>}
-          {feed.map((e, i) => (
-            <li key={`${e.inns}-${e.ball}-${i}-${e.score}`}
-              className={cn("flex gap-3 py-2 text-sm", i === 0 && playing && "animate-in fade-in slide-in-from-top-1")}>
-              <span className="w-14 shrink-0 font-mono text-[11px] text-muted-foreground tnum">
-                {isTest ? `${e.inns}·` : ""}{e.ball}
-              </span>
-              <span className={cn("w-7 shrink-0 text-center font-display text-lg leading-5 font-bold",
-                e.kind === "wicket" ? "bg-signal text-signal-foreground" : isBoundary(e) ? "text-signal" : "text-muted-foreground")}>
-                {e.kind === "wicket" ? "W" : e.kind === "wide" ? "wd" : e.kind === "noball" ? "nb" : e.runs}
-              </span>
-              <span className={cn("min-w-0 flex-1", e.kind === "wicket" && "font-semibold")}>
-                {e.text.replace(/^\S+ /, "")}
-              </span>
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground tnum">{e.score}</span>
-            </li>
-          ))}
-        </ol>
+        <Moments moments={seen} cursor={cursor} onJump={jump} isTest={isTest} live={live && !done} />
       </div>
+    </div>
+  );
+}
 
-      {/* live board */}
-      <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-        <div className="bg-[oklch(0.17_0.01_150)] p-5 text-[oklch(0.93_0.012_85)]">
+function Board({ state: s, who, isTest, winProb, firstBatting }: {
+  state: LiveState; who: (t: string) => string; isTest: boolean; winProb: number | null; firstBatting?: string;
+}) {
+  const youFirst = firstBatting === YOU;
+  return (
+    <div className="bg-[oklch(0.17_0.01_150)] text-[oklch(0.93_0.012_85)]">
+      <div className="grid gap-px bg-white/10 md:grid-cols-[1.1fr_1.4fr_1fr]">
+        {/* score */}
+        <div className="bg-[oklch(0.17_0.01_150)] p-5">
           <div className="flex justify-between font-mono text-[10px] tracking-widest uppercase opacity-70">
-            <span>{now ? `${who(innings[curInns - 1]?.batting ?? "")} batting` : "Toss"}</span>
-            <span>{isTest ? `Innings ${curInns}` : curInns === 1 ? "1st innings" : "Chase"}</span>
+            <span>{s.started ? `${who(s.batting)} batting` : "Toss done"}</span>
+            <span>{isTest ? `Innings ${s.inns}` : s.inns === 1 ? "1st innings" : "Chase"}</span>
           </div>
           <div className="mt-3 font-display text-7xl leading-none font-black text-[oklch(0.67_0.19_27)] tnum">
-            {now ? now.score : "0/0"}
+            {s.runs}/{s.wickets}
           </div>
           <div className="mt-1 font-mono text-xs opacity-70">
-            {now ? `over ${now.ball}` : "yet to start"}
-            {!isTest && curInns === 2 && innings[1]?.target ? ` · need ${Math.max(0, innings[1].target - Number(now?.score.split("/")[0] ?? 0))}` : ""}
+            {s.started ? `${s.overs} overs` : "yet to start"}
+            {s.need && s.started ? ` · need ${s.need.runs} from ${s.need.balls}` : ""}
+            {isTest && s.target ? ` · target ${s.target}` : ""}
           </div>
-          {now && (
-            <div className="mt-4 space-y-1 border-t border-white/10 pt-3 font-mono text-xs">
-              <div className="flex justify-between"><span className="opacity-60">On strike</span><span>{now.batter}</span></div>
-              <div className="flex justify-between"><span className="opacity-60">Bowling</span><span>{now.bowler}</span></div>
-            </div>
-          )}
         </div>
-        {winProb != null && (
-          <div>
-            <div className="mb-1.5 flex justify-between font-mono text-[11px] uppercase">
-              <span className={youFirst ? "text-signal" : ""}>{youFirst ? "You" : "World XI"} {Math.round(winProb * 100)}%</span>
-              <span className={!youFirst ? "text-signal" : ""}>{youFirst ? "World XI" : "You"} {Math.round((1 - winProb) * 100)}%</span>
+        {/* crease */}
+        <div className="bg-[oklch(0.17_0.01_150)] p-5 font-mono text-xs">
+          <div className="mb-2 text-[10px] tracking-widest uppercase opacity-60">At the crease</div>
+          {s.crease.map((c) => (
+            <div key={c.name} className="flex items-baseline justify-between gap-3 py-0.5">
+              <span className={cn("truncate", c.striker && "font-semibold")}>{c.name}{c.striker && <span className="text-[oklch(0.67_0.19_27)]"> *</span>}</span>
+              <span className="tnum"><b className="text-sm">{c.runs}</b> <span className="opacity-60">({c.balls})</span></span>
             </div>
-            <div className="flex h-2 w-full bg-chart-2">
-              <div className={cn("h-full transition-[width] duration-300", "bg-chart-1")} style={{ width: `${winProb * 100}%` }} />
-            </div>
-            <div className="mt-1 font-mono text-[10px] text-muted-foreground">Win chance for the side batting first</div>
+          ))}
+          <div className="mt-2 flex justify-between border-t border-white/10 pt-2 opacity-70">
+            <span>Partnership</span><span className="tnum">{s.partnership.runs} ({s.partnership.balls})</span>
           </div>
-        )}
-        <div className="font-mono text-[11px] text-muted-foreground">
-          {cursor} of {balls.length} deliveries
+          {s.lastWicket && <div className="mt-1 truncate opacity-60">Last out: {s.lastWicket}</div>}
         </div>
-      </aside>
+        {/* bowler + this over */}
+        <div className="bg-[oklch(0.17_0.01_150)] p-5 font-mono text-xs">
+          <div className="mb-2 text-[10px] tracking-widest uppercase opacity-60">Bowling</div>
+          {s.bowler ? (
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="truncate">{s.bowler.name}</span>
+              <span className="tnum">{s.bowler.overs}-{s.bowler.runs}-<b className="text-sm">{s.bowler.wickets}</b></span>
+            </div>
+          ) : <div className="opacity-60">—</div>}
+          <div className="mt-3 text-[10px] tracking-widest uppercase opacity-60">This over</div>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {s.thisOver.map((g, i) => (
+              <span key={i} className={cn("grid h-7 min-w-7 place-items-center px-1 text-[11px] font-bold tnum",
+                g === "W" ? "bg-[oklch(0.67_0.19_27)] text-white" : g === "4" || g === "6" ? "border border-[oklch(0.67_0.19_27)] text-[oklch(0.67_0.19_27)]" : "bg-white/10")}>
+                {g}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      {winProb != null && (
+        <div className="px-5 pt-3 pb-4">
+          <div className="mb-1.5 flex justify-between font-mono text-[11px] uppercase">
+            <span>{who(firstBatting ?? "")} {Math.round(winProb * 100)}%</span>
+            <span>{Math.round((1 - winProb) * 100)}% {youFirst ? who("") : "You"}</span>
+          </div>
+          <div className="flex h-1.5 w-full bg-white/15">
+            <div className="h-full bg-[oklch(0.67_0.19_27)] transition-[width] duration-300" style={{ width: `${winProb * 100}%` }} />
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function Moments({ moments, cursor, onJump, isTest, live }: {
+  moments: Moment[]; cursor: number; onJump: (at: number) => void; isTest: boolean; live: boolean;
+}) {
+  const listRef = useRef<HTMLOListElement>(null);
+  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [moments.length]);
+  return (
+    <aside className="space-y-2 lg:sticky lg:top-20 lg:self-start">
+      <div className="label">Key moments{live ? " so far" : ""}</div>
+      <ol ref={listRef} className="max-h-[32rem] space-y-px overflow-y-auto">
+        {moments.length === 0 && <li className="py-3 text-sm text-muted-foreground">None yet.</li>}
+        {moments.map((m) => (
+          <li key={`${m.at}-${m.kind}-${m.label}`}>
+            <button type="button" onClick={() => onJump(m.at)}
+              className={cn("flex w-full items-baseline gap-2 border-l-2 px-2 py-1.5 text-left text-xs hover:bg-muted",
+                m.kind === "wicket" ? "border-signal" : m.kind === "innings" ? "border-foreground" : "border-chart-2",
+                m.at === cursor && "bg-muted")}>
+              <span className="w-12 shrink-0 font-mono text-[10px] text-muted-foreground tnum">{isTest ? `${m.inns}·` : ""}{m.ball}</span>
+              <span className={cn("min-w-0 flex-1", (m.kind === "milestone" || m.kind === "innings") && "font-semibold")}>{m.label}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </aside>
   );
 }
 
 // ---------------------------------------------------------------- scorecard
 
-function InningsTable({ inn, n, isTest }: { inn: InningsCard; n: number; isTest: boolean }) {
+function InningsTable({ inn, n, isTest, who }: { inn: InningsCard; n: number; isTest: boolean; who: (t: string) => string }) {
   const batted = inn.batting_card.filter((b) => b.how_out);
   const dnb = inn.batting_card.filter((b) => !b.how_out);
   const extras = inn.extras.wides + inn.extras.noballs + inn.extras.byes;
@@ -256,7 +407,7 @@ function InningsTable({ inn, n, isTest }: { inn: InningsCard; n: number; isTest:
 
 // ---------------------------------------------------------------- worm
 
-function Worm({ match }: { match: FullMatch }) {
+function Worm({ match, who }: { match: FullMatch; who: (t: string) => string }) {
   const data = useMemo(() => {
     const byOver: Record<number, { over: number; a?: number; b?: number }> = {};
     for (const e of match.commentary) {

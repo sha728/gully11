@@ -7,10 +7,10 @@ export const XI_FORMATS = ["Test", "ODI", "T20I", "IPL"] as const;
 export type XIFormat = (typeof XI_FORMATS)[number];
 
 export const XI_COPY: Record<XIFormat, { title: string; blurb: string; unit: string }> = {
-  Test: { title: "Test", blurb: "Five Tests against the all-time XI: Bradman, Sobers, Warne and co.", unit: "nation" },
+  Test: { title: "Test", blurb: "Five Tests against the Greats: Bradman, Sobers, Warne and co.", unit: "nation" },
   ODI: { title: "ODI", blurb: "Fifty overs a side against Tendulkar, Viv Richards and Muralitharan.", unit: "nation" },
-  T20I: { title: "T20I", blurb: "Twenty overs against the T20I World XI.", unit: "nation" },
-  IPL: { title: "IPL", blurb: "Draft franchise by franchise, four overseas at most, against the IPL All-Stars.", unit: "franchise" },
+  T20I: { title: "T20I", blurb: "Twenty overs a side against the T20I Greats.", unit: "nation" },
+  IPL: { title: "IPL", blurb: "Draft franchise by franchise, four overseas at most, against the IPL Greats.", unit: "franchise" },
 };
 
 export interface Candidate {
@@ -124,6 +124,8 @@ export interface BallEvent {
   byes?: number;
   out?: string;
   how?: string;
+  wicket_kind?: string;
+  fielder?: string | null;
   score: string;
   text: string;
 }

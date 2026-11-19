@@ -84,12 +84,12 @@ export default async function SeriesPage({ params, searchParams }: Props) {
         { label: "Lost", value: String(r.lost) },
         ...(c.format === "Test" ? [{ label: "Drawn", value: String(r.drawn) }] : []),
         ...(r.tied ? [{ label: "Tied", value: String(r.tied) }] : []),
-        { label: "Opponent", value: c.opponent.replace(/^All-time /, "").replace(/ XI$/, " XI"), hint: XI_COPY[c.format].title },
+        { label: "Opponent", value: c.opponent.replace(/^All-time /, ""), hint: XI_COPY[c.format].title },
       ]} />
 
-      <Section n={1} title="The series" aside="tap a match for the full scorecard">
+      <Section n={1} title="The series" aside={<Link href={`/xi/c/${c.slug}/match/1`} className="hover:text-foreground">watch it ball by ball →</Link>}>
         <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-5">
-          {c.matches.map((m) => <MatchCard key={m.match} m={m} slug={c.slug} />)}
+          {c.matches.map((m) => <MatchCard key={m.match} m={m} slug={c.slug} them={c.opponent.replace(/^(Test|ODI|T20I|IPL) /, "").replace(/^All-time /, "")} />)}
         </div>
       </Section>
 
@@ -121,7 +121,7 @@ export default async function SeriesPage({ params, searchParams }: Props) {
         <Section n={3} title="Challenge a friend">
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Send this link. They get exactly the same eleven spins and try to beat <b className="text-foreground">{r.verdict.toLowerCase()}</b>.
+              Send this link. They get exactly the same eleven spins and try to top <b className="text-foreground">{r.verdict.toLowerCase()}</b>.
             </p>
             <ShareBox path={replay} />
             <div className="flex flex-wrap gap-2">
@@ -130,7 +130,7 @@ export default async function SeriesPage({ params, searchParams }: Props) {
             </div>
             {lost && (
               <p className="font-mono text-[11px] text-muted-foreground">
-                Tip: the World XI bats deep. Strong top-order batters and a fifth genuine bowler usually swing a series.
+                Tip: the Greats bat deep. Strong top-order batters and a fifth genuine bowler usually swing a series.
               </p>
             )}
           </div>
@@ -140,7 +140,7 @@ export default async function SeriesPage({ params, searchParams }: Props) {
   );
 }
 
-function MatchCard({ m, slug }: { m: MatchSummary; slug: string }) {
+function MatchCard({ m, slug, them }: { m: MatchSummary; slug: string; them: string }) {
   const mine = m.winner === MINE;
   return (
     <Link href={`/xi/c/${slug}/match/${m.match}`} className="group flex flex-col gap-3 bg-card p-4 hover:bg-muted">
@@ -155,7 +155,7 @@ function MatchCard({ m, slug }: { m: MatchSummary; slug: string }) {
         {m.scores.map((s, i) => (
           <div key={i} className="flex justify-between gap-2">
             <span className={cn("truncate", s.team === MINE ? "text-foreground" : "text-muted-foreground")}>
-              {s.team === MINE ? "You" : "World"}
+              {s.team === MINE ? "You" : them}
             </span>
             <span>{s.runs}/{s.wickets}{s.declared ? "d" : ""} <span className="text-muted-foreground">({s.overs})</span></span>
           </div>

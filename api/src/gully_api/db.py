@@ -1,4 +1,6 @@
+import logging
 from collections.abc import Iterator
+from pathlib import Path
 
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -21,6 +23,7 @@ def open_pool() -> None:
     global _pool
     _pool = ConnectionPool(
         settings.database_url,
+        open=True,
         min_size=1,
         max_size=10,
         configure=_configure,
@@ -41,3 +44,18 @@ def get_conn() -> Iterator:
         raise RuntimeError("database pool not open (app startup did not run)")
     with _pool.connection() as conn:
         yield conn
+
+
+APP_SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema" / "app.sql"
+
+
+def apply_app_schema() -> None:
+    """Create the API's own tables (xi_challenges, sim_results) if missing. Safe to
+    run on every start; a database that isn't up yet is logged, not fatal."""
+    if _pool is None:
+        return
+    try:
+        with _pool.connection(timeout=5) as conn:
+            conn.execute(APP_SCHEMA.read_text())
+    except Exception as e:  # pragma: no cover - startup without a database
+        logging.getLogger(__name__).warning("app schema not applied: %s", e)

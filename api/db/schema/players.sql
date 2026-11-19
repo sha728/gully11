@@ -4,7 +4,8 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Children before parents (foreign keys).
-DROP TABLE IF EXISTS player_venue_stats, player_dismissals, venue_format_stats, venues,
+DROP TABLE IF EXISTS legends, player_teams,
+    player_venue_stats, player_dismissals, venue_format_stats, venues,
     player_phase_form, player_phase_stats, player_season_stats, player_format_stats, players;
 
 CREATE TABLE players (
@@ -218,3 +219,48 @@ CREATE TABLE player_venue_stats (
 
 CREATE INDEX venues_name_trgm ON venues USING gin (name gin_trgm_ops);
 CREATE INDEX player_venue_stats_venue ON player_venue_stats (venue_id, format);
+
+-- Pre-2001 greats (Wikipedia infobox career figures), one row per format -------
+CREATE TABLE legends (
+    id           text NOT NULL,             -- 'L-<name slug>'
+    cricsheet_id text REFERENCES players (id), -- same person in the ball-by-ball data
+    name         text NOT NULL,
+    country      text NOT NULL,
+    format       text NOT NULL,             -- Test / ODI
+    matches      integer,
+    runs         integer,
+    bat_avg      double precision,
+    bat_sr       double precision,          -- usually unknown for this era
+    hundreds     integer,
+    fifties      integer,
+    highest      integer,
+    balls_bowled integer,
+    wickets      integer,
+    bowl_avg     double precision,
+    bowl_econ    double precision,
+    bowl_sr      double precision,
+    best_bowling text,
+    catches      integer,
+    stumpings    integer,
+    role         text NOT NULL,
+    batting_hand text,
+    bowling_arm  text,
+    bowling_type text,
+    format_start integer,
+    format_end   integer,
+    era_start    integer,
+    era_end      integer,
+    source_url   text,
+    PRIMARY KEY (id, format)
+);
+
+-- Sides each player appeared for, per format and season ---------------------
+CREATE TABLE player_teams (
+    player_id text NOT NULL REFERENCES players (id),
+    format    text NOT NULL,
+    season    text NOT NULL,
+    team      text NOT NULL,
+    matches   integer NOT NULL,
+    PRIMARY KEY (player_id, format, season, team)
+);
+CREATE INDEX player_teams_lookup ON player_teams (format, team, season);

@@ -1,0 +1,29 @@
+{
+  "_comment": "Fixed opponents for the XI Builder, in batting order. Ids: Cricsheet register ids, or 'L-' legend ids (pre-2001 greats from pipeline/reference/legends.csv). Editorial picks; each must pass the same draft rules as a user's XI (tests enforce it).",
+  "Test": {
+    "name": "All-time Test XI",
+    "keeper": "2b6e6dec",
+    "players": ["L-sunil-gavaskar", "d8699ab7", "L-don-bradman", "L-sachin-tendulkar", "L-brian-lara",
+                "L-garfield-sobers", "2b6e6dec", "L-shane-warne", "L-wasim-akram", "L-malcolm-marshall",
+                "L-glenn-mcgrath"]
+  },
+  "ODI": {
+    "name": "All-time ODI XI",
+    "keeper": "4a8a2e3b",
+    "players": ["L-sachin-tendulkar", "740742ef", "L-viv-richards", "ba607b88", "c4487b84",
+                "4a8a2e3b", "L-shaun-pollock", "L-wasim-akram", "L-shane-warne",
+                "L-muttiah-muralitharan", "L-glenn-mcgrath"]
+  },
+  "T20I": {
+    "name": "T20I World XI",
+    "keeper": "99b75528",
+    "players": ["740742ef", "8a75e999", "ba607b88", "271f83cd", "99b75528", "b681e71e",
+                "dbe50b21", "5f547c8b", "45a7e761", "a12e1d51", "462411b3"]
+  },
+  "IPL": {
+    "name": "IPL All-Stars",
+    "keeper": "4a8a2e3b",
+    "players": ["ba607b88", "740742ef", "dcce6f09", "c4487b84", "271f83cd", "4a8a2e3b",
+                "fe93fd9d", "dbe50b21", "9d430b40", "5f547c8b", "462411b3"]
+  }
+}

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .commentary import describe
@@ -99,6 +100,7 @@ class Innings:
     bowl: dict[str, BowlLine] = field(default_factory=dict)
     fall_of_wickets: list[str] = field(default_factory=list)
     target: int | None = None
+    declared: bool = False
     # phase -> counts over OUTCOMES for balls faced (used by calibration/validation)
     outcomes: dict[str, list[int]] = field(
         default_factory=lambda: {p: [0] * 7 for p in ("PP", "middle", "death")})
@@ -112,7 +114,7 @@ class Innings:
         return {
             "batting": self.batting, "bowling": self.bowling,
             "runs": self.runs, "wickets": self.wickets, "overs": self.overs,
-            "target": self.target, "extras": self.extras,
+            "target": self.target, "declared": self.declared, "extras": self.extras,
             "batting_card": [{"id": pid, **vars(b)} for pid, b in self.bat.items()],
             "bowling_card": [{"id": pid, **vars(b), "overs": b.overs}
                              for pid, b in self.bowl.items() if b.balls or b.runs],
@@ -126,16 +128,17 @@ class MatchResult:
     env: str
     teams: tuple[str, str]
     innings: list[Innings]
-    winner: str | None          # None = tie
+    winner: str | None          # None = tie or draw
     margin: str
     commentary: list[dict]
-    win_prob: list[tuple[str, float]]   # (ball label, P(team batting first wins))
+    win_prob: list[tuple[str, float]]   # (ball label, P(team batting first wins)); limited overs only
+    result: str = "win"         # win / tie / draw
 
     def to_dict(self) -> dict:
         return {
             "seed": self.seed, "env": self.env, "teams": list(self.teams),
             "innings": [i.to_dict() for i in self.innings],
-            "winner": self.winner, "margin": self.margin,
+            "winner": self.winner, "margin": self.margin, "result": self.result,
             "commentary": self.commentary, "win_prob": self.win_prob,
         }
 
@@ -182,6 +185,23 @@ class _Match:
         # boundary rates for both sides; mean 1, spread fitted in calibration.
         sd = env.conditions_sd
         self.conditions = math.exp(self.rng.gauss(-sd * sd / 2, sd)) if sd else 1.0
+        # Test pitch wear: per-innings wicket and scoring factors measured from real
+        # Tests (balls per wicket 65 -> 61 -> 55 -> 53 across the four innings).
+        self.wear: dict[int, tuple[float, float]] = {}
+        if env.is_test and env.test_shape:
+            rows = env.test_shape["innings"]
+            weight = [r["n"] * r["overs"] for r in rows]
+            w_mean = sum(r["wicket_rate"] * x for r, x in zip(rows, weight)) / sum(weight)
+            r_mean = sum(r["run_rate"] * x for r, x in zip(rows, weight)) / sum(weight)
+            self.wear = {r["innings"]: (r["wicket_rate"] / w_mean, r["run_rate"] / r_mean) for r in rows}
+
+    def _worn(self, v: list[float], innings_no: int) -> list[float]:
+        wf, rf = self.wear.get(innings_no, (1.0, 1.0))
+        if wf == 1.0 and rf == 1.0:
+            return v
+        w = [v[0] * wf, v[1], v[2] * rf, v[3] * rf, v[4] * rf, v[5] * rf, v[6] * rf]
+        s = sum(w)
+        return [x / s for x in w]
 
     # -- probabilities ---------------------------------------------------
     def combined(self, bat: Profile, bowl: Profile, phase: str) -> list[float]:
@@ -216,11 +236,12 @@ class _Match:
 
     # -- bowling plan ----------------------------------------------------
     def choose_bowler(self, team: Team, by_id: dict[str, Profile], inn: Innings,
-                      over: int, last: str | None, left: dict[str, int]) -> str:
+                      over: int, last: str | None, left: dict[str, int], max_overs: int,
+                      spell: dict[str, int] | None = None) -> str:
         env = self.env
         phase = env.phase(over)
         options = team.bowling_options()
-        overs_left = env.overs - over
+        overs_left = max(1, max_overs - over)
         eligible = [b for b in options if left[b] > 0 and b != last]
         if not eligible:  # quotas exhausted: any fielder except the keeper
             keeper = team.keeper_id()
@@ -232,15 +253,21 @@ class _Match:
             rpb, wk = expected(p.bowl[ph])
             return 20 * wk - rpb - (p.wide[ph] + p.noball[ph])
 
-        # Keep the two best death bowlers' last overs for the death.
-        if phase != "death":
+        # Keep the two best death bowlers' last overs for the death (limited overs).
+        if phase != "death" and not env.is_test:
             death_first = env.phase_starts[-1][0]
             reserve = max(1, (env.overs - death_first) // 4)
             best_death = sorted(options, key=lambda b: value(b, "death"), reverse=True)[:2]
             kept = [b for b in eligible if not (b in best_death and left[b] <= reserve)]
             eligible = kept or eligible
 
-        scores = [value(b, phase) + 0.5 * left[b] / overs_left for b in eligible]
+        if env.is_test:
+            # No quotas in Tests: rest bowlers between spells. Each over beyond five in
+            # the current spell, and each over beyond 25 in the innings, costs a little.
+            scores = [value(b, phase) - 0.06 * max(0, (spell or {}).get(b, 0) - 5)
+                      - 0.01 * max(0, inn.bowl[b].balls // 6 - 25) for b in eligible]
+        else:
+            scores = [value(b, phase) + 0.5 * left[b] / overs_left for b in eligible]
         top = max(scores)
         weights = [math.exp((s - top) / 0.12) for s in scores]
         total = sum(weights)
@@ -248,8 +275,13 @@ class _Match:
 
     # -- one innings -----------------------------------------------------
     def innings(self, bat_team: Team, bowl_team: Team, innings_no: int,
-                target: int | None) -> Innings:
+                target: int | None, max_overs: int | None = None,
+                declare: "Callable[[Innings], bool] | None" = None) -> Innings:
+        """One innings. Limited overs: ``max_overs`` = the format's overs and bowler
+        quotas apply. Tests: ``max_overs`` = time left in the match, no quotas, and
+        ``declare`` is asked at the end of each over."""
         env, rng = self.env, self.rng
+        max_overs = env.overs if max_overs is None else max_overs
         inn = Innings(batting=bat_team.name, bowling=bowl_team.name, target=target)
         batters = bat_team.players
         for p in batters:
@@ -261,22 +293,24 @@ class _Match:
         striker, non_striker, next_in = 0, 1, 2
         inn.bat[batters[0].id].how_out = "not out"
         inn.bat[batters[1].id].how_out = "not out"
-        quota = env.max_overs_per_bowler
+        quota = env.max_overs_per_bowler if not env.is_test else 10_000
         left = {p.id: quota for p in squad}
+        spell: dict[str, int] = {p.id: 0 for p in squad}   # consecutive spell length (Tests)
+        rested: dict[str, int] = {p.id: 99 for p in squad}
         keeper = bowl_team.keeper_id()
         fielders = [p for p in bowl_team.players]
         last_bowler = None
-        n_balls = env.overs * 6
+        n_balls = max_overs * 6
 
         def done() -> bool:
             return (inn.wickets >= 10 or inn.legal_balls >= n_balls
                     or (target is not None and inn.runs >= target))
 
-        for over in range(env.overs):
+        for over in range(max_overs):
             if done():
                 break
             phase = env.phase(over)
-            bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left)
+            bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
             bowler = by_id[bid]
             bl = inn.bowl[bid]
             legal_in_over, runs_in_over = 0, 0
@@ -301,8 +335,12 @@ class _Match:
                 else:
                     noball = u < bowler.wide[phase] + bowler.noball[phase]
                     v = self.combined(bat, bowler, phase)
+                    if self.wear:
+                        v = self._worn(v, innings_no)
                     if target is not None:
-                        v = _aggression(v, self._chase_aggression(inn, target))
+                        a = (self._test_chase_intent(inn, target, max_overs) if env.is_test
+                             else self._chase_aggression(inn, target))
+                        v = _aggression(v, a)
                     o = _pick(rng, v)
                     line.balls += 1
                     inn.outcomes[phase][1 if (noball and o == 0) else o] += 1
@@ -362,15 +400,38 @@ class _Match:
                 if self.with_commentary:
                     event["text"] = describe(event, len(self.commentary))
                     self.commentary.append(event)
-                    self.win_prob.append(
-                        (f"{innings_no}:{ball_label}", round(self.p_first_wins(inn, innings_no), 4)))
+                    if not env.is_test:
+                        self.win_prob.append(
+                            (f"{innings_no}:{ball_label}", round(self.p_first_wins(inn, innings_no), 4)))
 
             if legal_in_over == 6 and runs_in_over == 0:
                 bl.maidens += 1
             left[bid] -= 1
             last_bowler = bid
+            # Spells: a bowler's spell continues while they bowl every other over.
+            for pid in spell:
+                rested[pid] = 0 if pid == bid else rested[pid] + 1
+                if rested[pid] >= 3:
+                    spell[pid] = 0
+            spell[bid] += 1
             striker, non_striker = non_striker, striker
+            if declare is not None and not done() and declare(inn):
+                inn.declared = True
+                break
         return inn
+
+    def _test_chase_intent(self, inn: Innings, target: int, overs_cap: int) -> float:
+        """Fourth-innings intent in a Test: go for it when the rate is gettable,
+        shut up shop for the draw when it isn't and wickets are falling."""
+        need = target - inn.runs
+        overs_left = max(1.0, overs_cap - inn.legal_balls / 6)
+        rate = need / overs_left
+        par = 3.3   # Test runs per over since 2001
+        if rate <= par:
+            return 1.0
+        if rate > 5.0 or (inn.wickets >= 6 and rate > 4.0):
+            return 0.75    # bat for the draw
+        return min((rate / par) ** 0.5, 1.3)
 
     def _chase_aggression(self, inn: Innings, target: int) -> float:
         need = target - inn.runs
@@ -415,6 +476,8 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
     None = decided by a seeded toss."""
     if isinstance(env, str):
         env = load_env(env)
+    if env.is_test:
+        raise ValueError(f"{env.name} is a Test environment; use simulate_test")
     m = _Match(env, seed, commentary)
     if bat_first is None:
         bat_first = m.rng.randrange(2)
@@ -432,3 +495,101 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
     return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name),
                        innings=[i1, i2], winner=winner, margin=margin,
                        commentary=m.commentary, win_prob=m.win_prob)
+
+
+# ---------------------------------------------------------------- Tests (beta)
+
+TEST_MATCH_OVERS = 450      # five days of 90 overs
+FOLLOW_ON_LEAD = 200
+
+
+def _overs_used(inn: Innings) -> int:
+    return -(-inn.legal_balls // 6)  # whole overs, rounding a part over up
+
+
+def _first_innings_declare(inn: Innings) -> bool:
+    """Batting first: declare on a big total, or a large one after a long day."""
+    return inn.runs >= 600 or (inn.runs >= 500 and inn.legal_balls >= 140 * 6)
+
+
+def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
+                  bat_first: int | None = None, commentary: bool = True) -> MatchResult:
+    """Simulate a Test (beta): two innings each inside 450 overs, simple
+    declarations, follow-on at a 200-run lead, draws when time runs out.
+
+    Declaration rules and the follow-on decision are design choices, not taken
+    from any source; see docs/simulator.md.
+    """
+    if isinstance(env, str):
+        env = load_env(env)
+    if not env.is_test:
+        raise ValueError(f"{env.name} is a limited-overs environment; use simulate_match")
+    m = _Match(env, seed, commentary)
+    if bat_first is None:
+        bat_first = m.rng.randrange(2)
+    first, second = (team_a, team_b) if bat_first == 0 else (team_b, team_a)
+    # Weather and bad light: some matches lose overs. How often is fitted to the real
+    # draw rate (validate_test_sim.py --fit); a design choice, not from any source.
+    p_loss, max_lost = env.test_weather
+    rain, amount = m.rng.random(), m.rng.random()   # always drawn, so seeds stay stable
+    lost = int(amount * max_lost) if rain < p_loss else 0
+    left = TEST_MATCH_OVERS - lost
+
+    i1 = m.innings(first, second, 1, None, max_overs=left, declare=_first_innings_declare)
+    left -= _overs_used(i1)
+    innings = [i1]
+
+    def draw() -> MatchResult:
+        return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
+                           winner=None, margin="match drawn", commentary=m.commentary,
+                           win_prob=[], result="draw")
+
+    def won(team: Team, margin: str) -> MatchResult:
+        return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
+                           winner=team.name, margin=margin, commentary=m.commentary, win_prob=[])
+
+    if left <= 0:
+        return draw()
+
+    # Second innings: declare once well ahead.
+    i2 = m.innings(second, first, 2, None, max_overs=left,
+                   declare=lambda inn: inn.runs - i1.runs >= 250 and inn.runs >= 450)
+    left -= _overs_used(i2)
+    innings.append(i2)
+    if left <= 0:
+        return draw()
+
+    lead = i1.runs - i2.runs
+    follow_on = lead >= FOLLOW_ON_LEAD and left >= 150
+    third, fourth = (second, first) if follow_on else (first, second)
+
+    def third_declare(inn: Innings) -> bool:
+        # Declare when the lead would need a chase above ~3.6 an over in the time left.
+        lead_now = (i1.runs + inn.runs - i2.runs) if not follow_on else -1
+        time_left = left - _overs_used(inn)
+        return not follow_on and lead_now >= max(200, 3.6 * time_left) or lead_now >= 450
+
+    i3 = m.innings(third, fourth, 3, None, max_overs=left, declare=third_declare)
+    left -= _overs_used(i3)
+    innings.append(i3)
+
+    totals = {first.name: i1.runs, second.name: i2.runs}
+    totals[third.name] += i3.runs
+    need = totals[third.name] - totals[fourth.name] + 1
+    if need <= 0:
+        # The side batting third is still behind: beaten by an innings.
+        return won(fourth, f"won by an innings and {1 - need} runs")
+    if left <= 0:
+        return draw()
+
+    i4 = m.innings(fourth, third, 4, need, max_overs=left)
+    innings.append(i4)
+    if i4.runs >= need:
+        return won(fourth, f"won by {10 - i4.wickets} wickets")
+    if i4.wickets >= 10:
+        if i4.runs == need - 1:
+            return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
+                               winner=None, margin="match tied", commentary=m.commentary,
+                               win_prob=[], result="tie")
+        return won(third, f"won by {need - 1 - i4.runs} runs")
+    return draw()

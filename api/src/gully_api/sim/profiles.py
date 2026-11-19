@@ -215,6 +215,24 @@ def from_career(id: str, name: str, role: str, env: Env, *,
     )
 
 
+def from_legend(row: dict, env: Env) -> Profile:
+    """Profile for a pre-2001 great from the ``legends`` table (career figures from
+    Wikipedia). Strike rates weren't recorded for most of that era, so a missing one
+    is estimated: the format's league-average strike rate, nudged by batting average
+    ((avg / league avg) ** 0.25, clamped to 0.7–1.15). Marked ``estimated``."""
+    base = [sum(env.bat_base[p][i] for p in PHASES) / 3 for i in range(7)]
+    league_rpb, league_w = expected(base)
+    bat_avg, bat_sr = row.get("bat_avg"), row.get("bat_sr")
+    if bat_avg and not bat_sr:
+        quality = min(max((bat_avg / (league_rpb / league_w)) ** 0.25, 0.7), 1.15)
+        bat_sr = 100 * league_rpb * quality
+    prof = from_career(row["id"], row["name"], row["role"], env, bat_avg=bat_avg, bat_sr=bat_sr,
+                       bowl_avg=row.get("bowl_avg") if (row.get("wickets") or 0) >= 10 else None,
+                       bowl_econ=row.get("bowl_econ") if (row.get("wickets") or 0) >= 10 else None)
+    prof.meta.update(legend=True, sr_estimated=not row.get("bat_sr"))
+    return prof
+
+
 def expected(vector: list[float]) -> tuple[float, float]:
     """(runs per ball, wicket probability) for an outcome vector."""
     return sum(p * r for p, r in zip(vector, RUNS)), vector[0]

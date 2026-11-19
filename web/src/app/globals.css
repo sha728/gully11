@@ -1,94 +1,205 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-/* Design tokens. Light by default, dark via the OS setting. */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Gully11 — "scorebook meets floodlights".
+ * Light: warm scorebook paper, ink, one cricket-ball red.
+ * Dark: night match under lights; same red, lifted.
+ * Corners stay square (Lyra). Numbers are always mono + tabular.
+ */
 :root {
-  --bg: #f6f7f5;
-  --surface: #ffffff;
-  --surface-2: #eef1ec;
-  --border: #dde2da;
-  --text: #15201a;
-  --muted: #5d6b62;
-  --accent: #0f7a4a;        /* pitch green */
-  --accent-soft: #dff1e6;
-  --accent-text: #ffffff;
-  --a-series: #0f7a4a;      /* player A in comparisons */
-  --b-series: #c2410c;      /* player B */
-  --good: #0f7a4a;
-  --warn: #b45309;
+  --radius: 0rem;
+
+  --background: oklch(0.965 0.012 85);        /* scorebook paper */
+  --foreground: oklch(0.18 0.01 60);          /* ink */
+  --card: oklch(0.985 0.008 85);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.985 0.008 85);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.18 0.01 60);
+  --primary-foreground: oklch(0.97 0.01 85);
+  --secondary: oklch(0.925 0.014 85);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.93 0.012 85);
+  --muted-foreground: oklch(0.48 0.015 70);
+  --accent: oklch(0.925 0.014 85);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.55 0.21 27);
+  --border: oklch(0.18 0.01 60 / 13%);
+  --input: oklch(0.18 0.01 60 / 18%);
+  --ring: oklch(0.55 0.2 27);
+
+  /* the one loud colour: a new cricket ball */
+  --signal: oklch(0.55 0.205 27);
+  --signal-foreground: oklch(0.98 0.01 85);
+  --signal-soft: oklch(0.55 0.205 27 / 12%);
+  /* comparisons: player A = ball red, player B = deep teal */
+  --chart-1: oklch(0.55 0.205 27);
+  --chart-2: oklch(0.47 0.085 215);
+  --chart-3: oklch(0.62 0.12 75);
+  --chart-4: oklch(0.42 0.06 150);
+  --chart-5: oklch(0.35 0.02 60);
+
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1411;
-    --surface: #151d18;
-    --surface-2: #1c2620;
-    --border: #2a362f;
-    --text: #e6ece8;
-    --muted: #94a39a;
-    --accent: #3fbf7f;
-    --accent-soft: #173426;
-    --accent-text: #08130d;
-    --a-series: #3fbf7f;
-    --b-series: #f08a4b;
-    --good: #3fbf7f;
-    --warn: #f0b04b;
-  }
+.dark {
+  --background: oklch(0.155 0.008 150);       /* night match */
+  --foreground: oklch(0.93 0.012 85);
+  --card: oklch(0.19 0.009 150);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.2 0.01 150);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.93 0.012 85);
+  --primary-foreground: oklch(0.16 0.008 150);
+  --secondary: oklch(0.24 0.01 150);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.23 0.01 150);
+  --muted-foreground: oklch(0.68 0.012 85);
+  --accent: oklch(0.25 0.012 150);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.19 27);
+  --border: oklch(0.93 0.012 85 / 11%);
+  --input: oklch(0.93 0.012 85 / 16%);
+  --ring: oklch(0.68 0.19 27);
+
+  --signal: oklch(0.67 0.19 27);
+  --signal-foreground: oklch(0.15 0.01 150);
+  --signal-soft: oklch(0.67 0.19 27 / 16%);
+  --chart-1: oklch(0.67 0.19 27);
+  --chart-2: oklch(0.74 0.09 205);
+  --chart-3: oklch(0.8 0.12 85);
+  --chart-4: oklch(0.7 0.1 150);
+  --chart-5: oklch(0.6 0.02 85);
 }
 
 @theme inline {
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-border: var(--border);
-  --color-text: var(--text);
+  --font-sans: var(--font-instrument);
+  --font-mono: var(--font-jetbrains);
+  --font-display: var(--font-shoulders);
+  --font-heading: var(--font-jetbrains);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
-  --color-accent-text: var(--accent-text);
-  --color-a: var(--a-series);
-  --color-b: var(--b-series);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-soft: var(--signal-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
 }
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: var(--signal);
+    color: var(--signal-foreground);
+  }
 }
 
-/* Tabular figures everywhere numbers line up in columns. */
-.num {
-  font-variant-numeric: tabular-nums;
+@layer utilities {
+  /* Big condensed type for names, scores and page titles. */
+  .font-display {
+    font-family: var(--font-display), ui-sans-serif, sans-serif;
+    font-feature-settings: "lnum", "tnum";
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  /* Small caps-style labels used across scoreboards and table heads. */
+  .label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  /* The ball seam: a red rule with stitches either side. */
+  .seam {
+    position: relative;
+    height: 10px;
+    background:
+      linear-gradient(var(--signal), var(--signal)) center / 100% 2px no-repeat,
+      repeating-linear-gradient(90deg, var(--signal) 0 5px, transparent 5px 12px) top / 100% 1.5px no-repeat,
+      repeating-linear-gradient(90deg, var(--signal) 0 5px, transparent 5px 12px) bottom / 100% 1.5px no-repeat;
+    opacity: 0.9;
+  }
+  /* Faint scorebook ruling behind hero sections. */
+  .ruled {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 31px,
+      var(--border) 31px,
+      var(--border) 32px
+    );
+  }
 }
 
-table.stats {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
+/* Ticker on the home page; still for people who prefer less motion. */
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
 }
-table.stats th {
-  text-align: right;
-  font-weight: 500;
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+.ticker-track {
+  animation: ticker 60s linear infinite;
 }
-table.stats td {
-  text-align: right;
-  padding: 0.45rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-table.stats th:first-child,
-table.stats td:first-child {
-  text-align: left;
-}
-table.stats tbody tr:hover {
-  background: var(--surface-2);
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
 }

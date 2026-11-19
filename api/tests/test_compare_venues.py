@@ -65,3 +65,20 @@ def test_profile_has_dismissals_and_venues(client):
     assert p["venues"][0]["venue_name"] == "M Chinnaswamy Stadium"
     assert all(v["format"] == "IPL" for v in p["venues"])
     assert "exp_sixes" not in p["phases"][0]      # simulator-only columns stay out of the API
+
+
+def test_small_samples_are_not_ranked(client):
+    """Kohli's 29 Test overs must not rank against specialist bowlers."""
+    kohli, smith = pid(client, "kohli"), pid(client, "steve smith", "Test")
+    k = client.get("/api/v1/compare", params={"a": kohli, "b": smith, "format": "Test"}).json()["players"][0]
+    m = {x["key"]: x for x in k["metrics"]}
+    assert m["bowl_econ"]["qualified"] is False and m["bowl_econ"]["percentile"] is None
+    assert m["bowl_econ"]["value"] is not None            # still shown, just not ranked
+    assert m["bat_avg"]["qualified"] is True and m["bat_avg"]["percentile"] is not None
+
+
+def test_venue_search_is_strict(client):
+    names = [v["name"] for v in client.get("/api/v1/venues", params={"q": "rashid"}).json()]
+    assert not any("Shahid" in n for n in names)          # no loose fuzzy noise
+    assert client.get("/api/v1/venues", params={"q": "wankhede"}).json()[0]["id"] == "wankhede-stadium"
+    assert client.get("/api/v1/venues", params={"q": "chinaswamy"}).json()[0]["id"] == "m-chinnaswamy-stadium"

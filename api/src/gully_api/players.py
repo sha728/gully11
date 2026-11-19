@@ -74,11 +74,13 @@ def search_players(
     role: Role | None = None,
     format: Format | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort: Literal["matches", "runs", "wickets"] = "matches",
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SearchResult:
     """Fuzzy name search (pg_trgm word similarity) with optional filters.
 
-    Without ``q``, players are ordered by matches played (most first).
+    Without ``q``, players are ordered by ``sort`` (matches by default; runs and
+    wickets apply when a format is given).
     """
     where: list[str] = []
     params: dict[str, Any] = {"limit": limit, "offset": offset, "q": q, "format": format}
@@ -104,11 +106,11 @@ def search_players(
         join = "JOIN player_format_stats s ON s.player_id = p.id AND s.format = %(format)s"
         stat_cols = ("s.matches AS format_matches, s.runs, s.bat_avg, s.bat_sr, "
                      "s.wickets, s.bowl_econ")
-        order_matches = "s.matches"
+        order_matches = f"s.{sort}"
     else:
         join = ""
         stat_cols = "NULL::int AS format_matches"
-        order_matches = "p.matches"
+        order_matches = "p.matches"  # runs/wickets need a format
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     sql = f"""

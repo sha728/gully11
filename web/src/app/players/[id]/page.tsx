@@ -1,12 +1,17 @@
+import { ScalesIcon } from "@phosphor-icons/react/ssr";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Bar, FormatTabs, Nothing, PageHeader, Scoreboard, Section, type ScoreItem } from "@/components/blocks";
 import { SeasonChart } from "@/components/charts";
-import { Card, Chip, Empty, FormatTabs, Stat } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   api, displayName, fmt, FORMAT_LABEL, FORMATS, mainFormat, NotFound, overs, ROLE_LABEL, span,
-  type Format, type FormatStats, type PlayerProfile,
+  type Format, type FormatStats, type PlayerProfile, type VenueSplit,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ format?: string }> };
 
@@ -23,16 +28,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const p = await load((await params).id);
   return {
     title: displayName(p.player),
-    description: `${displayName(p.player)} career stats: ${p.formats.map((f) => FORMAT_LABEL[f.format]).join(", ")}.`,
+    description: `${displayName(p.player)}: ${p.formats.map((f) => FORMAT_LABEL[f.format]).join(", ")} numbers, ball by ball.`,
   };
 }
 
-const PHASE_LABEL = { PP: "Powerplay", middle: "Middle overs", death: "Death overs" } as const;
-const DISMISSAL_LABEL: Record<string, string> = {
-  caught: "Caught", bowled: "Bowled", lbw: "LBW", "run out": "Run out",
-  "caught and bowled": "Caught & bowled", stumped: "Stumped", "hit wicket": "Hit wicket",
-  "obstructing the field": "Obstructing the field", "handled the ball": "Handled the ball",
+const PHASE = { PP: "Powerplay", middle: "Middle", death: "Death" } as const;
+const OUT: Record<string, string> = {
+  caught: "Caught", bowled: "Bowled", lbw: "LBW", "run out": "Run out", "caught and bowled": "Caught & bowled",
+  stumped: "Stumped", "hit wicket": "Hit wicket", "obstructing the field": "Obstructing", "handled the ball": "Handled ball",
 };
+
+const th = "label h-9";
 
 export default async function PlayerPage({ params, searchParams }: Props) {
   const { id } = await params;
@@ -51,215 +57,248 @@ export default async function PlayerPage({ params, searchParams }: Props) {
   const dismissals = prof.dismissals.filter((d) => d.format === format);
   const venues = prof.venues.filter((v) => v.format === format);
   const outs = dismissals.reduce((a, d) => a + d.n, 0);
+  const batVenues = venues.filter((v) => v.bat_innings >= 3).sort((a, b) => b.runs - a.runs).slice(0, 6);
+  const bowlVenues = venues.filter((v) => v.balls_bowled >= 60).sort((a, b) => b.wickets - a.wickets).slice(0, 6);
+
+  // Lead with the player's main suit: bowlers show the ball first and only it is
+  // highlighted; everyone else leads with the bat.
+  const bowlerFirst = bowls && (player.role === "BOWL" || !bats);
+  const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
+  const board: ScoreItem[] = [];
+  if (cur) {
+    const batting: ScoreItem[] = bats ? [
+      { label: "Runs", value: fmt(cur.runs), hint: `HS ${cur.highest ?? "–"}`, emphasis: !bowlerFirst },
+      { label: "Average", value: fmt(cur.bat_avg, 2), hint: `${cur.hundreds}×100  ${cur.fifties}×50` },
+      { label: "Strike rate", value: fmt(cur.bat_sr, 1),
+        hint: `${plural(cur.fours, "four", "fours")} · ${plural(cur.sixes, "six", "sixes")}` },
+    ] : [];
+    const bowling: ScoreItem[] = bowls ? [
+      { label: "Wickets", value: fmt(cur.wickets), hint: cur.wickets ? `Best ${cur.best_bowling}` : undefined, emphasis: bowlerFirst },
+      { label: "Economy", value: fmt(cur.bowl_econ, 2), hint: `Avg ${fmt(cur.bowl_avg, 2)}` },
+      ...(bowlerFirst ? [{ label: "Balls per wicket", value: fmt(cur.bowl_sr, 1), hint: `${fmt(cur.bowl_dot_pct, 1)}% dots` }] : []),
+    ] : [];
+    board.push({ label: "Matches", value: fmt(cur.matches) });
+    // A specialist bowler's batting shrinks to runs only.
+    board.push(...(bowlerFirst ? [...bowling, ...batting.slice(0, 1)] : [...batting, ...bowling]));
+    if (player.role === "WK") board.push({ label: "Dismissals", value: fmt(cur.catches + cur.stumpings), hint: `${cur.stumpings} stumpings` });
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{displayName(player)}</h1>
-          {player.full_name && player.full_name !== player.name && (
-            <p className="mt-0.5 text-sm text-muted">{player.name} on scorecards</p>
+    <div className="space-y-12">
+      <div>
+        <PageHeader
+          kicker={[player.country, ROLE_LABEL[player.role], span(player.era_start, player.era_end)].filter(Boolean).join(" · ")}
+          title={displayName(player)}
+          sub={
+            <div className="flex flex-wrap items-center gap-2">
+              {player.full_name && player.full_name !== player.name && (
+                <span className="font-mono text-xs">{player.name} on the scorecard</span>
+              )}
+              <Badge variant="outline" className="font-mono text-[10px] uppercase">{player.capped ? "International" : "Uncapped"}</Badge>
+              {player.batting_hand && <Badge variant="outline">{player.batting_hand}</Badge>}
+              {player.bowling_style && <Badge variant="outline">{player.bowling_style}</Badge>}
+            </div>
+          }
+          actions={format && (
+            <Button asChild variant="outline" size="lg">
+              <Link href={`/compare?a=${player.id}&format=${format}`}><ScalesIcon />Compare</Link>
+            </Button>
           )}
-          <div className="mt-2 flex flex-wrap gap-2">
-            {player.country && <Chip>{player.country}</Chip>}
-            <Chip>{ROLE_LABEL[player.role]}</Chip>
-            <Chip>{span(player.era_start, player.era_end)}</Chip>
-            <Chip>{player.capped ? "International" : "Uncapped"}</Chip>
-            {player.batting_hand && <Chip>{player.batting_hand}</Chip>}
-            {player.bowling_style && <Chip>{player.bowling_style}</Chip>}
-          </div>
-        </div>
-        {format && (
-          <Link href={`/compare?a=${player.id}&format=${format}`}
-            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:border-accent">
-            Compare with…
-          </Link>
+          className="mb-0"
+        />
+        {available.length > 0 && (
+          <FormatTabs formats={available} active={format} hrefFor={(f) => `/players/${player.id}?format=${f}`} className="mt-6" />
         )}
       </div>
 
-      {available.length > 0 && (
-        <FormatTabs formats={available} active={format} hrefFor={(f) => `/players/${player.id}?format=${f}`} />
-      )}
-
-      {cur ? (
+      {!cur ? (
+        <Nothing title="No ball-by-ball record">This player has no deliveries in the Cricsheet data.</Nothing>
+      ) : (
         <>
-          {/* Headline numbers */}
-          <div className="grid grid-cols-2 gap-6 rounded-xl border border-border bg-surface p-5 sm:grid-cols-3 lg:grid-cols-6">
-            <Stat label="Matches" value={fmt(cur.matches)} />
-            {bats && <Stat label="Runs" value={fmt(cur.runs)} hint={`HS ${cur.highest ?? "–"}`} />}
-            {bats && <Stat label="Average" value={fmt(cur.bat_avg, 2)} hint={`${cur.hundreds} × 100 · ${cur.fifties} × 50`} />}
-            {bats && <Stat label="Strike rate" value={fmt(cur.bat_sr, 1)} />}
-            {bowls && <Stat label="Wickets" value={fmt(cur.wickets)} hint={cur.wickets && cur.best_bowling ? `Best ${cur.best_bowling}` : undefined} />}
-            {bowls && <Stat label="Economy" value={fmt(cur.bowl_econ, 2)} hint={`Avg ${fmt(cur.bowl_avg, 2)}`} />}
-            {player.role === "WK" && <Stat label="Dismissals" value={fmt(cur.catches + cur.stumpings)} hint={`${cur.stumpings} stumpings`} />}
-          </div>
+          <Scoreboard items={board} />
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card title="Season by season" aside={FORMAT_LABEL[format!]} className="lg:col-span-2">
+          <div className="grid gap-12 lg:grid-cols-[1.7fr_1fr]">
+            <Section n={1} title="Season by season" aside={FORMAT_LABEL[format!]}>
               {seasons.length > 1 ? (
-                <SeasonChart showBowling={bowls}
+                <SeasonChart showBowling={bowls} initial={bowlerFirst ? "bowl" : "bat"}
                   data={seasons.map((s) => ({ season: s.season!, runs: s.runs, bat_avg: s.bat_avg,
                     bat_sr: s.bat_sr, wickets: s.wickets, bowl_econ: s.bowl_econ }))} />
-              ) : <Empty>Only one season in this format.</Empty>}
-            </Card>
+              ) : <Nothing title="One season">Only one season in this format so far.</Nothing>}
+            </Section>
 
-            <Card title="How they get out" aside={outs ? `${outs} dismissals` : undefined}>
+            <Section n={2} title="How they get out" aside={outs ? `${outs} dismissals` : undefined}>
               {dismissals.length ? (
-                <ul className="space-y-2.5">
-                  {dismissals.map((d) => (
+                <ul className="space-y-3.5">
+                  {dismissals.map((d, i) => (
                     <li key={d.kind}>
-                      <div className="flex justify-between text-sm">
-                        <span>{DISMISSAL_LABEL[d.kind] ?? d.kind}</span>
-                        <span className="num text-muted">{d.n} · {Math.round((100 * d.n) / outs)}%</span>
+                      <div className="mb-1.5 flex items-baseline justify-between text-sm">
+                        <span className={cn(i === 0 && "font-semibold")}>{OUT[d.kind] ?? d.kind}</span>
+                        <span className="font-mono text-xs text-muted-foreground tnum">
+                          {d.n} <span className="ml-1 text-foreground">{Math.round((100 * d.n) / outs)}%</span>
+                        </span>
                       </div>
-                      <div className="mt-1 h-1.5 rounded-full bg-surface-2">
-                        <div className="h-1.5 rounded-full bg-accent" style={{ width: `${(100 * d.n) / outs}%` }} />
-                      </div>
+                      <Bar value={d.n} max={outs} tone={i === 0 ? "signal" : "muted"} />
                     </li>
                   ))}
                 </ul>
-              ) : <Empty>Never dismissed in this format.</Empty>}
-            </Card>
+              ) : <Nothing title="Never out">Not dismissed in this format.</Nothing>}
+            </Section>
           </div>
 
           {phases.length > 0 && (
-            <div className="grid gap-6 lg:grid-cols-2">
-              {(["bat", "bowl"] as const).map((role) => {
+            <div className="grid gap-12 lg:grid-cols-2">
+              {(bowlerFirst ? (["bowl", "bat"] as const) : (["bat", "bowl"] as const)).map((role, k) => {
                 const rows = phases.filter((p) => p.role === role);
-                if (!rows.length || (role === "bowl" && !bowls)) return null;
+                if (!rows.length || (role === "bowl" && !bowls) || (role === "bat" && !bats)) return null;
                 return (
-                  <Card key={role} title={role === "bat" ? "Batting by phase" : "Bowling by phase"}>
-                    <div className="-mx-4 overflow-x-auto">
-                      <table className="stats">
-                        <thead>
-                          <tr>
-                            <th>Phase</th><th>Balls</th>
-                            {role === "bat"
-                              ? <><th>Runs</th><th>SR</th><th>Dot %</th><th>4s+6s %</th><th>Balls/out</th></>
-                              : <><th>Wkts</th><th>Econ</th><th>Dot %</th><th>4s+6s %</th><th>Balls/wkt</th></>}
-                          </tr>
-                        </thead>
-                        <tbody>
+                  <Section key={role} n={3 + k} title={role === "bat" ? "Batting by phase" : "Bowling by phase"}>
+                    <div className="border-y">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead className={th}>Phase</TableHead>
+                            <TableHead className={`${th} text-right`}>Balls</TableHead>
+                            <TableHead className={`${th} text-right`}>{role === "bat" ? "Runs" : "Wkts"}</TableHead>
+                            <TableHead className={`${th} text-right`}>{role === "bat" ? "SR" : "Econ"}</TableHead>
+                            <TableHead className={`${th} text-right`}>Dot %</TableHead>
+                            <TableHead className={`${th} text-right`}>4/6 %</TableHead>
+                            <TableHead className={`${th} text-right`}>{role === "bat" ? "Balls/out" : "Balls/wkt"}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody className="font-mono tnum">
                           {rows.map((p) => (
-                            <tr key={p.phase}>
-                              <td>{PHASE_LABEL[p.phase]}</td>
-                              <td>{fmt(p.balls)}</td>
-                              {role === "bat" ? <td>{fmt(p.runs)}</td> : <td>{fmt(p.wickets)}</td>}
-                              <td>{role === "bat" ? fmt(p.strike_rate, 1) : fmt(p.economy, 2)}</td>
-                              <td>{fmt((p.dot_pct ?? 0) * 100, 1)}</td>
-                              <td>{fmt(((p.four_pct ?? 0) + (p.six_pct ?? 0)) * 100, 1)}</td>
-                              <td>{p.wickets ? fmt(p.balls / p.wickets, 1) : "–"}</td>
-                            </tr>
+                            <TableRow key={p.phase}>
+                              <TableCell className="font-sans font-medium">{PHASE[p.phase]}</TableCell>
+                              <TableCell className="text-right text-muted-foreground">{fmt(p.balls)}</TableCell>
+                              <TableCell className="text-right">{role === "bat" ? fmt(p.runs) : fmt(p.wickets)}</TableCell>
+                              <TableCell className="text-right font-semibold">{role === "bat" ? fmt(p.strike_rate, 1) : fmt(p.economy, 2)}</TableCell>
+                              <TableCell className="text-right">{fmt((p.dot_pct ?? 0) * 100, 1)}</TableCell>
+                              <TableCell className="text-right">{fmt(((p.four_pct ?? 0) + (p.six_pct ?? 0)) * 100, 1)}</TableCell>
+                              <TableCell className="text-right">{p.wickets ? fmt(p.balls / p.wickets, 1) : "–"}</TableCell>
+                            </TableRow>
                           ))}
-                        </tbody>
-                      </table>
+                        </TableBody>
+                      </Table>
                     </div>
-                  </Card>
+                  </Section>
                 );
               })}
             </div>
           )}
 
-          {venues.length > 0 && (
-            <div className="grid gap-6 lg:grid-cols-2">
-              {bats && (
-                <Card title="Best venues: batting" aside="3+ innings">
-                  <VenueTable rows={[...venues].filter((v) => v.bat_innings >= 3).sort((a, b) => b.runs - a.runs).slice(0, 8)}
-                    cols={["Inns", "Runs", "Avg", "SR"]}
+          {(batVenues.length > 0 || bowlVenues.length > 0) && (
+            <div className="grid gap-12 lg:grid-cols-2">
+              {bats && batVenues.length > 0 && (
+                <Section n={5} title="Best grounds · bat" aside="3+ innings">
+                  <VenueTable rows={batVenues} cols={["Inns", "Runs", "Avg", "SR"]} hot={1}
                     cells={(v) => [fmt(v.bat_innings), fmt(v.runs), fmt(v.bat_avg, 2), fmt(v.bat_sr, 1)]} />
-                </Card>
+                </Section>
               )}
-              {bowls && venues.some((v) => v.balls_bowled >= 60) && (
-                <Card title="Best venues: bowling" aside="10+ overs">
-                  <VenueTable rows={[...venues].filter((v) => v.balls_bowled >= 60).sort((a, b) => b.wickets - a.wickets).slice(0, 8)}
-                    cols={["Overs", "Wkts", "Econ"]}
+              {bowls && bowlVenues.length > 0 && (
+                <Section n={6} title="Best grounds · ball" aside="10+ overs">
+                  <VenueTable rows={bowlVenues} cols={["Overs", "Wkts", "Econ"]} hot={1}
                     cells={(v) => [overs(v.balls_bowled), fmt(v.wickets), fmt(v.bowl_econ, 2)]} />
-                </Card>
+                </Section>
               )}
             </div>
           )}
         </>
-      ) : (
-        <Card><Empty>No ball-by-ball records for this player.</Empty></Card>
       )}
 
-      <CareerTables formats={prof.formats} />
+      <Career formats={prof.formats} active={format} />
     </div>
   );
 }
 
-function VenueTable<T extends { venue_id: string; venue_name: string }>({ rows, cols, cells }: {
-  rows: T[]; cols: string[]; cells: (r: T) => string[];
+function VenueTable({ rows, cols, cells, hot }: {
+  rows: VenueSplit[]; cols: string[]; cells: (r: VenueSplit) => string[]; hot: number;
 }) {
-  if (!rows.length) return <Empty>Not enough matches at any venue.</Empty>;
   return (
-    <div className="-mx-4 overflow-x-auto">
-      <table className="stats">
-        <thead><tr><th>Venue</th>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-        <tbody>
+    <div className="border-y">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={th}>Ground</TableHead>
+            {cols.map((c) => <TableHead key={c} className={`${th} text-right`}>{c}</TableHead>)}
+          </TableRow>
+        </TableHeader>
+        <TableBody className="font-mono tnum">
           {rows.map((r) => (
-            <tr key={r.venue_id}>
-              <td><Link href={`/venues/${r.venue_id}`} className="hover:text-accent">{r.venue_name}</Link></td>
-              {cells(r).map((c, i) => <td key={i}>{c}</td>)}
-            </tr>
+            <TableRow key={r.venue_id}>
+              <TableCell className="max-w-56 truncate font-sans">
+                <Link href={`/venues/${r.venue_id}`} className="font-medium hover:text-signal">{r.venue_name}</Link>
+              </TableCell>
+              {cells(r).map((c, i) => (
+                <TableCell key={i} className={cn("text-right", i === hot && "font-semibold")}>{c}</TableCell>
+              ))}
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
 
-function CareerTables({ formats }: { formats: FormatStats[] }) {
+function Career({ formats, active }: { formats: FormatStats[]; active?: Format }) {
   if (!formats.length) return null;
   const bowled = formats.filter((f) => f.balls_bowled > 0);
+  const row = (f: FormatStats) => cn(f.format === active && "bg-signal-soft hover:bg-signal-soft");
   return (
-    <div className="grid gap-6">
-      <Card title="Career batting">
-        <div className="-mx-4 overflow-x-auto">
-          <table className="stats">
-            <thead>
-              <tr><th>Format</th><th>Mat</th><th>Inns</th><th>NO</th><th>Runs</th><th>HS</th><th>Avg</th>
-                <th>SR</th><th>100</th><th>50</th><th>4s</th><th>6s</th><th>Ct</th><th>St</th></tr>
-            </thead>
-            <tbody>
-              {formats.map((f) => (
-                <tr key={f.format}>
-                  <td>{FORMAT_LABEL[f.format]}</td><td>{fmt(f.matches)}</td><td>{fmt(f.bat_innings)}</td>
-                  <td>{fmt(f.not_outs)}</td><td className="font-medium">{fmt(f.runs)}</td><td>{f.highest ?? "–"}</td>
-                  <td>{fmt(f.bat_avg, 2)}</td><td>{fmt(f.bat_sr, 1)}</td><td>{f.hundreds}</td><td>{f.fifties}</td>
-                  <td>{fmt(f.fours)}</td><td>{fmt(f.sixes)}</td><td>{f.catches}</td><td>{f.stumpings}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-      {bowled.length > 0 && (
-        <Card title="Career bowling">
-          <div className="-mx-4 overflow-x-auto">
-            <table className="stats">
-              <thead>
-                <tr><th>Format</th><th>Inns</th><th>Overs</th><th>Runs</th><th>Wkts</th><th>Best</th>
-                  <th>Avg</th><th>Econ</th><th>SR</th><th>Dot %</th><th>5w</th></tr>
-              </thead>
-              <tbody>
-                {bowled.map((f) => (
-                  <tr key={f.format}>
-                    <td>{FORMAT_LABEL[f.format]}</td><td>{fmt(f.bowl_innings)}</td><td>{overs(f.balls_bowled)}</td>
-                    <td>{fmt(f.runs_conceded)}</td><td className="font-medium">{fmt(f.wickets)}</td>
-                    <td>{f.wickets ? f.best_bowling : "–"}</td><td>{fmt(f.bowl_avg, 2)}</td><td>{fmt(f.bowl_econ, 2)}</td>
-                    <td>{fmt(f.bowl_sr, 1)}</td><td>{fmt(f.bowl_dot_pct, 1)}</td><td>{f.five_wkts}</td>
-                  </tr>
+    <div className="space-y-10">
+      <Section n={7} title="Career · batting">
+        <div className="border-y">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                {["Format", "Mat", "Inns", "NO", "Runs", "HS", "Avg", "SR", "100", "50", "4s", "6s", "Ct", "St"].map((h, i) => (
+                  <TableHead key={h} className={cn(th, i > 0 && "text-right")}>{h}</TableHead>
                 ))}
-              </tbody>
-            </table>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="font-mono tnum">
+              {formats.map((f) => (
+                <TableRow key={f.format} className={row(f)}>
+                  <TableCell className="font-sans font-semibold">{FORMAT_LABEL[f.format]}</TableCell>
+                  {[fmt(f.matches), fmt(f.bat_innings), fmt(f.not_outs), fmt(f.runs), String(f.highest ?? "–"),
+                    fmt(f.bat_avg, 2), fmt(f.bat_sr, 1), String(f.hundreds), String(f.fifties), fmt(f.fours),
+                    fmt(f.sixes), String(f.catches), String(f.stumpings)].map((v, i) => (
+                    <TableCell key={i} className={cn("text-right", i === 3 && "font-semibold")}>{v}</TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </Section>
+      {bowled.length > 0 && (
+        <Section n={8} title="Career · bowling">
+          <div className="border-y">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  {["Format", "Inns", "Overs", "Runs", "Wkts", "Best", "Avg", "Econ", "SR", "Dot %", "5w"].map((h, i) => (
+                    <TableHead key={h} className={cn(th, i > 0 && "text-right")}>{h}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody className="font-mono tnum">
+                {bowled.map((f) => (
+                  <TableRow key={f.format} className={row(f)}>
+                    <TableCell className="font-sans font-semibold">{FORMAT_LABEL[f.format]}</TableCell>
+                    {[fmt(f.bowl_innings), overs(f.balls_bowled), fmt(f.runs_conceded), fmt(f.wickets),
+                      f.wickets ? f.best_bowling ?? "–" : "–", fmt(f.bowl_avg, 2), fmt(f.bowl_econ, 2),
+                      fmt(f.bowl_sr, 1), fmt(f.bowl_dot_pct, 1), String(f.five_wkts)].map((v, i) => (
+                      <TableCell key={i} className={cn("text-right", i === 3 && "font-semibold")}>{v}</TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
-        </Card>
+        </Section>
       )}
-      <p className="text-xs text-muted">
-        Source: Cricsheet ball-by-ball records. Figures cover the matches Cricsheet holds and can
-        differ from official career totals.
+      <p className="font-mono text-[11px] text-muted-foreground">
+        Source: Cricsheet ball-by-ball records. Figures cover the matches Cricsheet holds and can sit below official career totals.
       </p>
     </div>
   );

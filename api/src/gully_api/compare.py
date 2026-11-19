@@ -17,6 +17,9 @@ from .players import Format
 router = APIRouter(tags=["compare"])
 
 MIN_BALLS = 500
+# A player's own figure is only ranked once they have this many balls on that side;
+# 29 overs of part-time bowling shouldn't 'win' economy against specialists.
+MIN_SAMPLE = 300
 
 # key -> (label, side, higher_is_better, SQL over aggregated columns)
 METRICS: dict[str, tuple[str, Literal["bat", "bowl"], bool, str]] = {
@@ -42,6 +45,7 @@ class Metric(BaseModel):
     higher_is_better: bool
     value: float | None
     percentile: float | None
+    qualified: bool            # enough balls to be ranked (MIN_SAMPLE)
 
 
 class ComparedPlayer(BaseModel):
@@ -59,6 +63,7 @@ class Comparison(BaseModel):
     from_year: int | None
     to_year: int | None
     min_balls_for_percentiles: int
+    min_sample_to_rank: int
     players: list[ComparedPlayer]
 
 
@@ -80,8 +85,9 @@ def _metrics(conn, totals: dict, fmt: str) -> list[Metric]:
             f"SELECT {expr} AS v FROM (SELECT {', '.join(f'%({c})s::float AS {c}' for c in AGG_COLS)}) t",
             {c: totals[c] or 0 for c in AGG_COLS}).fetchone()["v"]
         pct = None
-        if value is not None:
-            balls = "balls_faced" if side == "bat" else "balls_bowled"
+        balls = "balls_faced" if side == "bat" else "balls_bowled"
+        qualified = (totals[balls] or 0) >= MIN_SAMPLE
+        if value is not None and qualified:
             better = "<" if higher else ">"
             pct = conn.execute(
                 f"SELECT round((100.0 * count(*) FILTER (WHERE v {better} %(x)s) / nullif(count(*), 0))::numeric, 1)"
@@ -89,7 +95,8 @@ def _metrics(conn, totals: dict, fmt: str) -> list[Metric]:
                 f"WHERE format = %(f)s AND {balls} >= {MIN_BALLS}) pool WHERE v IS NOT NULL",
                 {"x": value, "f": fmt}).fetchone()["p"]
         out.append(Metric(key=key, label=label, side=side, higher_is_better=higher,
-                          value=round(value, 2) if value is not None else None, percentile=pct))
+                          value=round(value, 2) if value is not None else None, percentile=pct,
+                          qualified=qualified))
     return out
 
 
@@ -112,4 +119,4 @@ def compare(
         totals = _totals(conn, pid, format, from_year, to_year) or dict.fromkeys(AGG_COLS, 0)
         players.append(ComparedPlayer(**p, totals=totals, metrics=_metrics(conn, totals, format)))
     return Comparison(format=format, from_year=from_year, to_year=to_year,
-                      min_balls_for_percentiles=MIN_BALLS, players=players)
+                      min_balls_for_percentiles=MIN_BALLS, min_sample_to_rank=MIN_SAMPLE, players=players)

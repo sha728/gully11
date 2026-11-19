@@ -138,6 +138,7 @@ export interface Metric {
   higher_is_better: boolean;
   value: number | null;
   percentile: number | null;
+  qualified: boolean;
 }
 
 export interface Comparison {
@@ -145,6 +146,7 @@ export interface Comparison {
   from_year: number | null;
   to_year: number | null;
   min_balls_for_percentiles: number;
+  min_sample_to_rank: number;
   players: {
     id: string;
     name: string;

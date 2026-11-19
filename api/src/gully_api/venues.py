@@ -36,8 +36,10 @@ def search_venues(
     params: dict[str, Any] = {"q": q, "format": format, "limit": limit}
     where = []
     if q:
-        where.append("(%(q)s <%% v.name OR v.name ILIKE '%%' || %(q)s || '%%' "
-                     "OR v.city ILIKE '%%' || %(q)s || '%%')")
+        # Stricter than player search: ground names are long, so a loose fuzzy match
+        # ("rashid" ~ "Shahid") is mostly noise. Substring, or a strong fuzzy hit.
+        where.append("(v.name ILIKE '%%' || %(q)s || '%%' OR v.city ILIKE '%%' || %(q)s || '%%' "
+                     "OR word_similarity(%(q)s, v.name) >= 0.6)")
     if format:
         where.append("EXISTS (SELECT 1 FROM venue_format_stats s WHERE s.venue_id = v.id "
                      "AND s.format = %(format)s)")

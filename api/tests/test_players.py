@@ -59,6 +59,14 @@ def test_search_filters_with_format_stats(client):
     assert all(p["role"] == "BOWL" for p in body["items"])
 
 
+def test_search_sort_by_runs_and_wickets(client):
+    runs = client.get("/api/v1/players", params={"format": "IPL", "sort": "runs", "limit": 3}).json()["items"]
+    assert runs[0]["name"] == "V Kohli" and runs[0]["runs"] >= runs[1]["runs"] >= runs[2]["runs"]
+    wkts = client.get("/api/v1/players", params={"format": "IPL", "sort": "wickets", "limit": 2}).json()["items"]
+    assert wkts[0]["name"] == "YS Chahal"
+    assert client.get("/api/v1/players", params={"sort": "sixes"}).status_code == 422
+
+
 def test_search_validation(client):
     assert client.get("/api/v1/players", params={"format": "Hundred"}).status_code == 422
     assert client.get("/api/v1/players", params={"q": "k"}).status_code == 422

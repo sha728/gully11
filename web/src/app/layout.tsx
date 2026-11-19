@@ -1,47 +1,48 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
-import SearchBox from "@/components/SearchBox";
+import { Big_Shoulders, Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { SearchPaletteProvider } from "@/components/search-palette";
+import { SiteHeader, Wordmark } from "@/components/site-header";
+import { themeScript } from "@/components/theme-toggle";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+// No metric overrides exist for Big Shoulders, so skip the generated fallback (avoids a build warning).
+const display = Big_Shoulders({ subsets: ["latin"], weight: ["600", "700", "800", "900"], variable: "--font-shoulders", adjustFontFallback: false });
+const sans = Instrument_Sans({ subsets: ["latin"], variable: "--font-instrument" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains" });
 
 export const metadata: Metadata = {
-  title: { default: "Gully11 · Cricket stats", template: "%s · Gully11" },
+  title: { default: "Gully11 — cricket, ball by ball", template: "%s — Gully11" },
   description:
-    "Player stats, head-to-head comparisons and venue records for Test, ODI, T20I and IPL cricket.",
+    "Career and season numbers, phase splits, head-to-heads and ground records for Tests, ODIs, T20Is and the IPL.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-            <Link href="/" className="text-lg font-semibold tracking-tight">
-              <span className="text-accent">Gully</span>11
-            </Link>
-            <nav className="flex gap-4 text-sm text-muted">
-              <Link href="/players" className="hover:text-text">Players</Link>
-              <Link href="/compare" className="hover:text-text">Compare</Link>
-              <Link href="/venues" className="hover:text-text">Venues</Link>
-            </nav>
-            <div className="ml-auto w-full sm:w-72">
-              <SearchBox />
-            </div>
-          </div>
-        </header>
-        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
-        <footer className="mx-auto max-w-6xl px-4 pb-10 pt-6 text-xs text-muted">
-          Ball-by-ball data from{" "}
-          <a className="underline" href="https://cricsheet.org/">Cricsheet</a> (
-          <a className="underline" href="https://cricsheet.org/licensing/">ODC-BY</a>). Stats cover
-          the matches Cricsheet records: men&apos;s Tests from Dec 2001, ODIs from 2002, T20Is from
-          2005, every IPL match. Some older internationals are missing, so career totals can
-          trail official figures. Player names from Wikidata (CC0); player details from
-          Wikipedia (CC BY-SA 4.0).
-        </footer>
+    <html lang="en" suppressHydrationWarning className={cn(display.variable, sans.variable, mono.variable)}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="min-h-dvh">
+        <TooltipProvider delayDuration={150}>
+          <SearchPaletteProvider>
+            <SiteHeader />
+            <main className="mx-auto max-w-7xl px-4 pt-8 pb-16 sm:px-6">{children}</main>
+            <footer className="border-t">
+              <div className="mx-auto grid max-w-7xl gap-6 px-4 py-10 sm:px-6 md:grid-cols-[auto_1fr]">
+                <Wordmark />
+                <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground md:justify-self-end md:text-right">
+                  Ball-by-ball data from <a className="underline underline-offset-2 hover:text-foreground" href="https://cricsheet.org/">Cricsheet</a>{" "}
+                  (<a className="underline underline-offset-2 hover:text-foreground" href="https://cricsheet.org/licensing/">ODC-BY</a>):
+                  men&apos;s Tests from Dec 2001, ODIs from 2002, T20Is from 2005 and every IPL match. A few older
+                  internationals are missing, so some career totals sit below the official ones. Names from
+                  Wikidata (CC0); player details from Wikipedia (CC BY-SA 4.0).
+                </p>
+              </div>
+            </footer>
+          </SearchPaletteProvider>
+        </TooltipProvider>
       </body>
     </html>
   );

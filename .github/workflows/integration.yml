@@ -1,0 +1,70 @@
+# Full end-to-end run on fresh Cricsheet data: download -> parse -> build ->
+# spot-check -> load into Postgres -> API tests that need real data.
+# Weekly (Cricsheet updates continuously) and on demand from the Actions tab.
+name: Integration
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: integration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  full-data:
+    name: Full data + API
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gully11
+          POSTGRES_PASSWORD: gully11
+          POSTGRES_DB: gully11
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gully11"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://gully11:gully11@localhost:5432/gully11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Pipeline (download, parse, build, spot-check, load)
+        working-directory: pipeline
+        run: |
+          uv sync --locked
+          uv run gully-pipeline download --dataset all
+          uv run gully-pipeline parse --dataset all
+          uv run gully-pipeline build --dataset all
+          uv run gully-pipeline spotcheck
+          uv run gully-pipeline load
+
+      - name: API tests against loaded data
+        working-directory: api
+        env:
+          REQUIRE_DB: "1"   # fail, don't skip, if the database isn't there
+        run: |
+          uv sync --locked
+          uv run pytest -q -rs
+
+      # Informational: data refreshes can shift scoring levels; a drift here means
+      # the simulator calibration should be refitted (see docs/simulator.md).
+      - name: Simulator check vs latest IPL season
+        working-directory: api
+        continue-on-error: true
+        run: uv run python scripts/validate_sim.py --years 2026 2026 --runs 10

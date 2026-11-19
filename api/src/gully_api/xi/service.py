@@ -1,5 +1,5 @@
 """XI Builder: spin for an era and a nation (or IPL franchise), draft an XI under
-role rules, play a seeded 5-match series against a fixed World XI.
+role rules, play a seeded 5-match series against a fixed XI of greats.
 
 Everything is deterministic from (format, seed, picks): the same inputs give the
 same spins, the same candidate lists and the same series, which is what makes
@@ -374,7 +374,7 @@ def challenge_slug(fmt: str, seed: int, picks: list[str], slots: list[int]) -> s
 
 def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
                 name: str = "Your XI") -> dict:
-    """Validate, then play five seeded matches against the World XI, batting in the
+    """Validate, then play five seeded matches against the Greats, batting in the
     chosen order. Returns a summary plus the full match records."""
     ordered = validate(conn, fmt, seed, picks, slots)
     prof = profiles(conn, fmt, [r["id"] for r in ordered])

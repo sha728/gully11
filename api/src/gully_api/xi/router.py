@@ -80,6 +80,9 @@ def _view(conn, row: dict) -> dict[str, Any]:
             **_draft(conn, row).view()}
 
 
+# Write endpoints commit before responding: the pooled connection's own commit
+# runs only after the response has gone out, so a quick follow-up request (spin
+# right after creating a draft, the series page right after Play) could miss it.
 def _save(conn, row: dict, **changes) -> dict:
     sets = ", ".join(f"{k} = %s" for k in changes)
     vals = [Jsonb(v) if k == "picks" else v for k, v in changes.items()]
@@ -112,6 +115,7 @@ def new_draft(req: NewDraft, conn=Depends(get_conn)) -> dict[str, Any]:
     conn.execute("INSERT INTO xi_drafts (id, format, seed, daily, rival, revealed, picks) "
                  "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                  (row["id"], req.format, seed, day, rival, 0, Jsonb(row["picks"])))
+    conn.commit()
     return _view(conn, row)
 
 
@@ -130,7 +134,9 @@ def spin(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
         raise HTTPException(409, "All eleven spins are out.")
     if d.waiting:
         raise HTTPException(409, "Pick a player from your last spin first.")
-    return _view(conn, _save(conn, row, revealed=row["revealed"] + 1))
+    row = _save(conn, row, revealed=row["revealed"] + 1)
+    conn.commit()
+    return _view(conn, row)
 
 
 def _act(conn, draft_id: str, fn) -> dict[str, Any]:
@@ -140,7 +146,9 @@ def _act(conn, draft_id: str, fn) -> dict[str, Any]:
         picks = fn(_draft(conn, row))
     except DraftError as e:
         raise HTTPException(422, str(e)) from e
-    return _view(conn, _save(conn, row, picks=picks))
+    row = _save(conn, row, picks=picks)
+    conn.commit()
+    return _view(conn, row)
 
 
 @router.post("/drafts/{draft_id}/pick")
@@ -162,7 +170,7 @@ def move(draft_id: str, req: Move, conn=Depends(get_conn)) -> dict[str, Any]:
 
 @router.post("/drafts/{draft_id}/play")
 def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
-    """Play the drafted XI: five seeded matches against the World XI, saved under a
+    """Play the drafted XI: five seeded matches against the Greats, saved under a
     share slug. Playing the same XI again returns the same slug."""
     row = _load(conn, draft_id, lock=True)
     if row["challenge"]:
@@ -187,6 +195,7 @@ def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
             "INSERT INTO sim_results (context, ref, match_no, match_json) VALUES ('xi', %s, %s, %s) "
             "ON CONFLICT (context, ref, match_no) DO NOTHING", (out["slug"], i, Jsonb(m)))
     _save(conn, row, challenge=out["slug"])
+    conn.commit()
     return {"slug": out["slug"], "rival": row["rival"]}
 
 

@@ -88,6 +88,17 @@ CREATE TABLE player_phase_stats (
     noball_rate    double precision,
     strike_rate    double precision,
     economy        double precision,
+    -- Expected counts had an average player faced/bowled the same balls in the
+    -- same competitions, years and phases (context-adjusted baseline).
+    exp_wickets      double precision,
+    exp_dots         double precision,
+    exp_ones         double precision,
+    exp_twos         double precision,
+    exp_threes       double precision,
+    exp_fours        double precision,
+    exp_sixes        double precision,
+    exp_wide_balls   double precision,
+    exp_noball_balls double precision,
     PRIMARY KEY (player_id, format, phase, role)
 );
 

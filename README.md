@@ -28,6 +28,7 @@ uv run gully-pipeline build --dataset all        # -> data/gully.duckdb player t
 uv run gully-pipeline load                       # -> Postgres (drops + reloads player tables)
 uv run gully-pipeline spotcheck                  # recount 10 players from raw JSON, diff vs tables
 uv run gully-pipeline legends                    # rebuild reference/legends.csv (needs WIKIMEDIA_CONTACT)
+uv run gully-pipeline simbase                    # simulator base rates -> api/src/gully_api/sim/data/
 uv run pytest
 
 # API
@@ -35,6 +36,7 @@ cd ../api
 uv sync
 uv run uvicorn gully_api.main:app --reload       # http://localhost:8000/docs
 uv run pytest                                    # player tests skip if Postgres isn't loaded
+uv run python scripts/validate_sim.py --fit 2024 2025 --years 2026 2026   # simulator vs real IPL
 
 # Web
 cd ../web

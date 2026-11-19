@@ -27,8 +27,20 @@ def main(argv: list[str] | None = None) -> None:
     sc.add_argument("names", nargs="*", help="Cricsheet unique names (default: 10 preset players)")
 
     sub.add_parser("legends", help="Rebuild reference/legends.csv from Wikipedia infoboxes")
+    sub.add_parser("simbase", help="Write the simulator's base_rates.json from parsed data")
 
     args = p.parse_args(argv)
+
+    if args.cmd == "simbase":
+        from .simbase import OUT_PATH, build_simbase
+        t0 = time.perf_counter()
+        res = build_simbase(PARQUET_DIR / "all", DB_PATH)
+        for name, env in res["envs"].items():
+            fi = env["first_innings"]
+            print(f"{name:11} first innings n={fi['innings']:5} mean={fi['mean']:6} "
+                  f"sd={fi['sd']:5} wkts={fi['mean_wickets']}")
+        print(f"-> {OUT_PATH} ({time.perf_counter() - t0:.1f}s)")
+        return
 
     if args.cmd == "legends":
         from .legends import LEGENDS_CSV, build_legends

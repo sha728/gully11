@@ -170,6 +170,74 @@ ORDER BY player_id, {k};
 """
 
 
+CONTEXT_SQL = f"""
+-- Context baselines: league-average rates per (format, competition, year, phase).
+-- A player's expected counts = their balls in each context x that context's rate,
+-- so ratings compare a player with the cricket they actually played in
+-- (an IPL batter against IPL scoring, not against all T20 everywhere).
+CREATE OR REPLACE TEMP VIEW fdc AS
+SELECT *, CASE WHEN team_type = 'international' THEN 'intl'
+               ELSE coalesce(event_name, 'other') END AS ctx,
+       year(start_date) AS yr
+FROM fd WHERE phase IS NOT NULL;
+
+CREATE OR REPLACE TEMP TABLE ctx_bat AS
+SELECT format, ctx, yr, phase,
+       count(*) FILTER (WHERE wides = 0) AS balls,
+       count(*) FILTER (WHERE wides = 0 AND is_wicket AND wicket_kind NOT IN {NOT_OUT_KINDS}) AS wickets,
+       count(*) FILTER (WHERE wides = 0 AND runs_batter = 0) AS dots,
+       count(*) FILTER (WHERE wides = 0 AND runs_batter = 1) AS ones,
+       count(*) FILTER (WHERE wides = 0 AND runs_batter = 2) AS twos,
+       count(*) FILTER (WHERE wides = 0 AND runs_batter = 3) AS threes,
+       count(*) FILTER (WHERE is_four) AS fours,
+       count(*) FILTER (WHERE is_six) AS sixes
+FROM fdc GROUP BY ALL;
+
+CREATE OR REPLACE TEMP TABLE ctx_bowl AS
+SELECT format, ctx, yr, phase,
+       count(*) FILTER (WHERE is_legal) AS balls,
+       count(*) FILTER (WHERE bowler_credited) AS wickets,
+       count(*) FILTER (WHERE is_legal AND runs_batter + wides + noballs = 0) AS dots,
+       count(*) FILTER (WHERE is_legal AND runs_batter = 1) AS ones,
+       count(*) FILTER (WHERE is_legal AND runs_batter = 2) AS twos,
+       count(*) FILTER (WHERE is_legal AND runs_batter = 3) AS threes,
+       count(*) FILTER (WHERE is_legal AND is_four) AS fours,
+       count(*) FILTER (WHERE is_legal AND is_six) AS sixes,
+       count(*) FILTER (WHERE wides > 0) AS wide_balls,
+       count(*) FILTER (WHERE noballs > 0) AS noball_balls
+FROM fdc GROUP BY ALL;
+
+CREATE OR REPLACE TEMP TABLE phase_exp AS
+WITH pb AS (
+    SELECT batter_id AS pid, format, ctx, yr, phase,
+           count(*) FILTER (WHERE wides = 0) AS n
+    FROM fdc WHERE batter_id IS NOT NULL GROUP BY ALL
+),
+pw AS (
+    SELECT bowler_id AS pid, format, ctx, yr, phase,
+           count(*) FILTER (WHERE is_legal) AS n
+    FROM fdc WHERE bowler_id IS NOT NULL GROUP BY ALL
+)
+SELECT 'bat' AS role, pid, format, phase,
+       sum(n * c.wickets / c.balls) AS exp_wickets, sum(n * c.dots / c.balls) AS exp_dots,
+       sum(n * c.ones / c.balls) AS exp_ones, sum(n * c.twos / c.balls) AS exp_twos,
+       sum(n * c.threes / c.balls) AS exp_threes, sum(n * c.fours / c.balls) AS exp_fours,
+       sum(n * c.sixes / c.balls) AS exp_sixes,
+       NULL::DOUBLE AS exp_wide_balls, NULL::DOUBLE AS exp_noball_balls
+FROM pb JOIN ctx_bat c USING (format, ctx, yr, phase) WHERE c.balls > 0 GROUP BY ALL
+UNION ALL
+SELECT 'bowl', pid, format, phase,
+       sum(n * c.wickets / c.balls), sum(n * c.dots / c.balls),
+       sum(n * c.ones / c.balls), sum(n * c.twos / c.balls),
+       sum(n * c.threes / c.balls), sum(n * c.fours / c.balls),
+       sum(n * c.sixes / c.balls),
+       sum(n * c.wide_balls / c.balls), sum(n * c.noball_balls / c.balls)
+FROM pw JOIN ctx_bowl c USING (format, ctx, yr, phase) WHERE c.balls > 0 GROUP BY ALL;
+"""
+
+EXP_COLS = ["exp_wickets", "exp_dots", "exp_ones", "exp_twos", "exp_threes", "exp_fours",
+            "exp_sixes", "exp_wide_balls", "exp_noball_balls"]
+
 PHASE_SQL = f"""
 -- Outcome counts per ball by phase. Raw counts are kept alongside rates so the
 -- simulator can apply shrinkage toward league base rates.
@@ -236,8 +304,10 @@ SELECT pid AS player_id, format, phase, role,
        round(wide_balls / nullif(balls, 0), 5) AS wide_rate,
        round(noball_balls / nullif(balls, 0), 5) AS noball_rate,
        round(100.0 * runs / nullif(balls, 0), 2) AS strike_rate,
-       round(6.0 * runs / nullif(balls, 0), 2) AS economy
+       round(6.0 * runs / nullif(balls, 0), 2) AS economy,
+       {", ".join(f"round(x.{c}, 3) AS {c}" for c in EXP_COLS)}
 FROM u
+LEFT JOIN phase_exp x USING (role, pid, format, phase)
 WHERE balls > 0
 ORDER BY player_id, format, phase, role;
 """
@@ -346,6 +416,7 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         con.execute(INNINGS_SQL)
         con.execute(stats_sql("player_format_stats", ["format"]))
         con.execute(stats_sql("player_season_stats", ["format", "season"]))
+        con.execute(CONTEXT_SQL)
         con.execute(PHASE_SQL)
         con.execute(PLAYERS_SQL)
         tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats"]

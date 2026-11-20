@@ -255,16 +255,15 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
   const fresh = youName ? [...season.matches].reverse().find((m) => m.teams.includes(youName)) : undefined;
   const unwatched = fresh && !seen.includes(fresh.match) && fresh.match === played ? fresh : undefined;
 
-  // The XI panel opens by itself when your match is up next, or when you arrive
-  // from "Change your XI" (…/season?xi=1).
+  // The XI panel opens when you ask: "Change XI", or arriving from "Change your
+  // XI" at the end of a match (…/season?xi=1).
   const openXi = () => {
     setEditing(true);
     requestAnimationFrame(() => document.getElementById("your-xi")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("xi")) openXi();
-    else if (nextIsMine) setEditing(true);
-  }, [nextIsMine]);
+  }, []);
   const xiNames = mineTeam ? mineTeam.xi.map((id) => mineTeam.players.find((p) => p.id === id)?.name ?? "") : [];
   const subName = mineTeam?.impact ? mineTeam.players.find((p) => p.id === mineTeam.impact)?.name : null;
 

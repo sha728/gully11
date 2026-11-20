@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import time
@@ -162,13 +163,25 @@ def _is_disconnect(e: Exception) -> bool:
 ROOMS = Rooms()
 
 
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def seats(room: Room) -> dict:
+    """Who ran which franchise, as token hashes (the tokens themselves aren't kept)."""
+    host = room.by_token(room.host_token)
+    return {"host": host.id if host else None,
+            "franchises": {f.id: token_hash(f.token) for f in room.franchises.values() if f.token}}
+
+
 def save_room(pool_factory):
     """A saver bound to the DB pool: writes the finished auction."""
     def save(room: Room) -> None:
         with pool_factory() as conn:
             conn.execute(
-                "INSERT INTO auction_rooms (code, mode, teams, result, ended_at) VALUES (%s, %s, %s, %s, now()) "
-                "ON CONFLICT (code) DO UPDATE SET result = EXCLUDED.result, ended_at = now()",
-                (room.code, room.mode, len(room.franchises), Jsonb(room.summary())))
+                "INSERT INTO auction_rooms (code, mode, teams, result, seats, ended_at) "
+                "VALUES (%s, %s, %s, %s, %s, now()) "
+                "ON CONFLICT (code) DO UPDATE SET result = EXCLUDED.result, seats = EXCLUDED.seats, ended_at = now()",
+                (room.code, room.mode, len(room.franchises), Jsonb(room.summary()), Jsonb(seats(room))))
             conn.commit()
     return save

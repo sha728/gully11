@@ -49,3 +49,17 @@ CREATE TABLE IF NOT EXISTS auction_rooms (
     created_at  timestamptz NOT NULL DEFAULT now(),
     ended_at    timestamptz
 );
+-- Who held which franchise (sha256 of each person's seat token) and the host's
+-- franchise, so the season after an auction knows whose squad is whose.
+ALTER TABLE auction_rooms ADD COLUMN IF NOT EXISTS seats jsonb;
+
+-- The season a finished auction's squads play: lineups while it's being set up,
+-- then the result (table, playoffs, caps, match summaries). Full matches live in
+-- sim_results with context 'season' and ref = room code.
+CREATE TABLE IF NOT EXISTS seasons (
+    code        text PRIMARY KEY REFERENCES auction_rooms(code),
+    lineups     jsonb NOT NULL DEFAULT '{}'::jsonb,   -- {franchise: {"xi": [ids, batting order], "impact": id}}
+    result      jsonb,                                -- set once played
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    played_at   timestamptz
+);

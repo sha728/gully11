@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import compare, players, venues
 from .xi import router as xi_router
 from .auction import router as auction_router
+from .season import router as season_router
 from .db import apply_app_schema, close_pool, open_pool
 from .settings import settings
 
@@ -42,4 +43,5 @@ v1.include_router(compare.router)
 v1.include_router(venues.router)
 v1.include_router(xi_router.router)
 v1.include_router(auction_router.router)
+v1.include_router(season_router.router)
 app.include_router(v1)

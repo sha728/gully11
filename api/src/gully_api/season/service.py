@@ -7,6 +7,7 @@ import zlib
 
 from psycopg.types.json import Jsonb
 
+from ..sim import captaincy
 from ..sim.engine import Team
 from ..sim.profiles import from_phase_rows
 from ..sim.rates import load_env
@@ -86,6 +87,7 @@ def squads(conn, room: dict) -> dict[str, dict]:
                 "id": pid, "name": p["name"], "role": p["role"], "overseas": p["overseas"],
                 "fair": p.get("fair", 0), "price": s.get("paid", s["price"]), "retained": bool(s.get("retained")),
                 "opener": bool(o and o["opened"] >= xi.OPENER_MIN_INNINGS and o["opened"] >= xi.OPENER_MIN_SHARE * o["innings"]),
+                "captaincy": captaincy.summary(pid, FORMAT),
                 "bat": bat, "bowl": bowl,
             }
             profiles[pid] = pr
@@ -94,19 +96,25 @@ def squads(conn, room: dict) -> dict[str, dict]:
     return out
 
 
-def lineup_for(team: dict, saved: dict | None) -> tuple[list[str], str | None, bool]:
-    """(xi in batting order, impact sub, picked by a person?)."""
+def lineup_for(team: dict, saved: dict | None) -> tuple[list[str], str | None, bool, str | None]:
+    """(xi in batting order, impact sub, picked by a person?, captain). The captain
+    is the one chosen if they're in the XI, else the best-rated captain in it."""
+    xi_ids, impact, picked = None, None, False
     if saved:
         try:
             lineup.check(team["players"], saved["xi"], saved.get("impact"))
-            return saved["xi"], saved.get("impact"), True
+            xi_ids, impact, picked = saved["xi"], saved.get("impact"), True
         except lineup.LineupError:
             pass                                    # squad changed or rules did: fall back to auto
-    xi_ids, impact = lineup.auto(team["players"])
-    return xi_ids, impact, False
+    if xi_ids is None:
+        xi_ids, impact = lineup.auto(team["players"])
+    chosen = (saved or {}).get("captain")
+    cap = chosen if chosen in xi_ids else (captaincy.best(xi_ids, FORMAT) or xi_ids[0] if xi_ids else None)
+    return xi_ids, impact, picked, cap
 
 
-def save_lineup(conn, room: dict, fid: str, xi_ids: list[str], impact: str | None) -> None:
+def save_lineup(conn, room: dict, fid: str, xi_ids: list[str], impact: str | None,
+                captain: str | None = None) -> None:
     """Set a franchise's XI for its coming matches (before or during the season)."""
     state = room["season"]
     if state and state.get("champion"):
@@ -118,12 +126,15 @@ def save_lineup(conn, room: dict, fid: str, xi_ids: list[str], impact: str | Non
         lineup.check(team["players"], xi_ids, impact)
     except lineup.LineupError as e:
         raise SeasonError(str(e)) from e
+    if captain is not None and captain not in xi_ids:
+        raise SeasonError("Your captain has to be in your XI.")
+    saved = {"xi": xi_ids, "impact": impact, "captain": captain}
     conn.execute("UPDATE seasons SET lineups = lineups || %s WHERE code = %s",
-                 (Jsonb({fid: {"xi": xi_ids, "impact": impact}}), room["code"]))
-    room["lineups"][fid] = {"xi": xi_ids, "impact": impact}
+                 (Jsonb({fid: saved}), room["code"]))
+    room["lineups"][fid] = saved
 
 
-def _team(fid: str, team: dict, xi_ids: list[str], impact: str | None, env) -> Team:
+def _team(fid: str, team: dict, xi_ids: list[str], impact: str | None, env, captain: str | None = None) -> Team:
     profs = [team["profiles"][i] for i in xi_ids]
     # A squad short of eleven (an auction can end that way) fields replacement players.
     n = 0
@@ -132,7 +143,8 @@ def _team(fid: str, team: dict, xi_ids: list[str], impact: str | None, env) -> T
         role = "BOWL" if n % 2 else "BAT"
         profs.append(from_phase_rows({"id": f"{fid}-rep{n}", "name": f"Replacement {n}", "role": role}, [], env))
     keeper = next((p.id for p in profs if p.role == "WK"), None)
-    return Team(team["name"], profs, keeper=keeper, impact=[team["profiles"][impact]] if impact else [])
+    return Team(team["name"], profs, keeper=keeper, impact=[team["profiles"][impact]] if impact else [],
+                captain=captain, captaincy=captaincy.rating(captain, FORMAT) if captain else 0.0)
 
 
 def start_season(conn, room: dict) -> dict:
@@ -162,9 +174,9 @@ def advance(conn, room: dict, how: str, you: str | None) -> dict:
     sq = squads(conn, room)
     teams, used = {}, {}
     for fid, team in sq.items():
-        xi_ids, impact, picked = lineup_for(team, room["lineups"].get(fid))
-        teams[fid] = _team(fid, team, xi_ids, impact, env)
-        used[fid] = {"xi": xi_ids, "impact": impact, "picked": picked}
+        xi_ids, impact, picked, cap = lineup_for(team, room["lineups"].get(fid))
+        teams[fid] = _team(fid, team, xi_ids, impact, env, cap)
+        used[fid] = {"xi": xi_ids, "impact": impact, "picked": picked, "captain": cap}
     played = 0
     while True:
         fx = run.next_fixture(state)
@@ -190,9 +202,10 @@ def view(conn, room: dict, token: str | None) -> dict:
     you = seat_of(room, token)
     teams = []
     for fid, team in squads(conn, room).items():
-        xi_ids, impact, picked = lineup_for(team, room["lineups"].get(fid))
+        xi_ids, impact, picked, cap = lineup_for(team, room["lineups"].get(fid))
         teams.append({"id": fid, "name": team["name"], "bot": team["bot"], "owner": team["owner"],
-                      "players": list(team["players"].values()), "xi": xi_ids, "impact": impact, "picked": picked})
+                      "players": list(team["players"].values()), "xi": xi_ids, "impact": impact, "picked": picked,
+                      "captain": cap})
     state = room["season"]
     nxt = run.next_fixture(state) if state else None
     return {"code": room["code"], "mode": room["mode"], "you": you, "host": is_host(room, token),

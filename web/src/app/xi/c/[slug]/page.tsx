@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ShareBox } from "@/components/xi/share-box";
 import { fmt, NotFound, ROLE_LABEL } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { XI_COPY, xiApi, type Challenge, type MatchSummary } from "@/lib/xi";
+import { captainText, XI_COPY, xiApi, type CaptainInfo, type Challenge, type MatchSummary } from "@/lib/xi";
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<{ vs?: string }> };
 
@@ -94,7 +94,7 @@ export default async function SeriesPage({ params, searchParams }: Props) {
       </Section>
 
       <div className="grid gap-12 lg:grid-cols-[1.3fr_1fr]">
-        <Section n={2} title="Your XI" aside="batting order">
+        <Section n={2} title="Your XI" aside="batting order · C = captain">
           <ol className="divide-y border-y">
             {c.xi.map((p) => (
               <li key={p.id} className="flex items-center gap-3 py-2.5">
@@ -109,6 +109,7 @@ export default async function SeriesPage({ params, searchParams }: Props) {
                     {ROLE_LABEL[p.role]} · {p.country ?? "—"} · {p.years}
                   </span>
                 </span>
+                {c.captains?.mine.id === p.id && <Badge className="bg-foreground font-mono text-[9px] text-background">C</Badge>}
                 {p.kind === "legend" && <Badge className="bg-signal font-mono text-[9px] text-signal-foreground">Legend</Badge>}
                 <span className="shrink-0 text-right font-mono text-xs text-muted-foreground tnum">
                   {keyStats(p.role, p.runs, p.wickets)}
@@ -116,6 +117,7 @@ export default async function SeriesPage({ params, searchParams }: Props) {
               </li>
             ))}
           </ol>
+          {c.captains && <Captains mine={c.captains.mine} them={c.captains.them} opponent={c.opponent} />}
         </Section>
 
         <Section n={3} title="Challenge a friend">
@@ -136,6 +138,22 @@ export default async function SeriesPage({ params, searchParams }: Props) {
           </div>
         </Section>
       </div>
+    </div>
+  );
+}
+
+function Captains({ mine, them, opponent }: { mine: CaptainInfo; them: CaptainInfo; opponent: string }) {
+  const row = (label: string, x: CaptainInfo) => (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 py-1.5 text-xs">
+      <span><span className="label mr-2">{label}</span><span className="font-semibold">{x.name ?? "—"}</span></span>
+      <span className="font-mono text-muted-foreground">{x.record ? captainText(x.record) : "no captaincy record"}</span>
+    </div>
+  );
+  return (
+    <div className="mt-4 divide-y border-y">
+      {row("Your captain", mine)}
+      {row(`${opponent}`, them)}
+      <p className="py-1.5 font-mono text-[10px] text-muted-foreground">Captains call the toss and run the bowling; a better real record means fewer bad calls.</p>
     </div>
   );
 }

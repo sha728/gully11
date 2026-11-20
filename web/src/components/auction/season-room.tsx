@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ROLE_LABEL } from "@/lib/api";
 import { loadSeat, money } from "@/lib/auction";
+import { captainText } from "@/lib/xi";
 import { seasonApi, watched, type CapRow, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
 import { cn } from "@/lib/utils";
 
@@ -104,7 +105,7 @@ function Setup({ code, view, token, setView }: { code: string; view: SeasonView;
   );
 }
 
-const xiKey = (t: SetupTeam) => `${t.xi.join(",")}|${t.impact ?? ""}`;
+const xiKey = (t: SetupTeam) => `${t.xi.join(",")}|${t.impact ?? ""}|${t.captain ?? ""}`;
 
 function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
   return (
@@ -118,7 +119,7 @@ function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
               <span className="font-mono text-[10px] text-muted-foreground uppercase">{t.id === you ? "you" : t.bot ? "bot" : t.owner}{t.picked ? " · picked" : " · auto"}</span>
             </div>
             <div className="mt-0.5 text-muted-foreground">
-              {t.xi.map((id) => t.players.find((p) => p.id === id)?.name).join(", ")}
+              {t.xi.map((id) => `${t.players.find((p) => p.id === id)?.name ?? ""}${id === t.captain ? " (c)" : ""}`).join(", ")}
               {t.impact && <> · <span className="text-foreground">sub {t.players.find((p) => p.id === t.impact)?.name}</span></>}
             </div>
           </li>
@@ -137,6 +138,7 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
   const byId = useMemo(() => Object.fromEntries(team.players.map((p) => [p.id, p])), [team.players]);
   const [xi, setXi] = useState<string[]>(team.xi);
   const [impact, setImpact] = useState<string | null>(team.impact);
+  const [captain, setCaptain] = useState<string | null>(team.captain);
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; msg?: string }>({ kind: justSaved ? "saved" : "idle" });
   const bench = team.players.filter((p) => !xi.includes(p.id));
   const os = xi.filter((id) => byId[id]?.overseas).length;
@@ -152,7 +154,7 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
   async function save() {
     setState({ kind: "saving" });
     try {
-      await seasonApi.lineup(code, token, xi, impact);
+      await seasonApi.lineup(code, token, xi, impact, captain && xi.includes(captain) ? captain : null);
       setState({ kind: "saved" });
       onSaved();
     } catch (e) {
@@ -172,6 +174,13 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
         </div>
       </div>
       {short && <p className="text-sm text-muted-foreground">Your squad has fewer than eleven players, so the engine fields replacements for you.</p>}
+      <div className="border-l-2 border-signal/60 pl-3 text-xs">
+        <span className="label mr-2">Captain</span>
+        {captain && byId[captain] ? (
+          <><span className="font-semibold">{byId[captain].name}</span>{" "}
+            <span className="text-muted-foreground">{byId[captain].captaincy ? captainText(byId[captain].captaincy!) : "no IPL or T20I captaincy record"}</span></>
+        ) : <span className="text-muted-foreground">tap C on a player (calls the toss and runs the bowling; a better real record, fewer bad calls)</span>}
+      </div>
       <ol className="divide-y border-y">
         {xi.map((id, i) => {
           const p = byId[id];
@@ -179,6 +188,9 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
             <li key={id} className="flex items-center gap-2 py-1.5">
               <span className="w-6 font-display text-lg font-bold text-muted-foreground tnum">{i + 1}</span>
               <PlayerName p={p} />
+              <Button variant={captain === id ? "default" : "ghost"} size="icon" className="size-7 font-mono text-[10px] font-bold"
+                onClick={() => { setCaptain(captain === id ? null : id); changed(); }} aria-pressed={captain === id}
+                title={captain === id ? "Captain" : "Make captain"} aria-label={`Make ${p.name} captain`}>C</Button>
               <Button variant="ghost" size="icon" className="size-7" disabled={i === 0} onClick={() => { move(i, -1); changed(); }} aria-label={`Move ${p.name} up`}><ArrowUpIcon /></Button>
               <Button variant="ghost" size="icon" className="size-7" disabled={i === xi.length - 1} onClick={() => { move(i, 1); changed(); }} aria-label={`Move ${p.name} down`}><ArrowDownIcon /></Button>
               <Button variant="ghost" size="icon" className="size-7" onClick={() => { setXi((x) => x.filter((y) => y !== id)); changed(); }} aria-label={`Drop ${p.name}`}><XIcon /></Button>
@@ -210,7 +222,7 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
         <Button onClick={save} disabled={short || xi.length !== 11 || state.kind === "saving"} className="font-mono uppercase">
           {state.kind === "saving" ? "Saving…" : "Save my XI"}
         </Button>
-        <Button variant="ghost" onClick={() => { setXi(team.xi); setImpact(team.impact); changed(); }}>Undo changes</Button>
+        <Button variant="ghost" onClick={() => { setXi(team.xi); setImpact(team.impact); setCaptain(team.captain); changed(); }}>Undo changes</Button>
         {state.kind === "saved" && <span className="text-sm text-signal">Saved: used from your next match.</span>}
         {state.kind === "error" && <span className="text-sm text-destructive">{state.msg}</span>}
       </div>
@@ -224,6 +236,7 @@ function PlayerName({ p }: { p: SeasonPlayer }) {
       <span className="block truncate text-sm font-medium">{p.name}
         {p.overseas && <span className="ml-1 font-mono text-[9px] text-signal">OS</span>}
         {p.opener && <span className="ml-1 font-mono text-[9px] text-muted-foreground uppercase">opener</span>}
+        {p.captaincy && p.captaincy.matches >= 5 && <span className="ml-1 font-mono text-[9px] text-signal uppercase" title={captainText(p.captaincy)}>capt</span>}
       </span>
       <span className="font-mono text-[10px] text-muted-foreground">{ROLE_LABEL[p.role]} · {money(p.price)}{p.retained ? " · kept" : ""}</span>
     </span>
@@ -265,7 +278,7 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("xi")) openXi();
   }, []);
-  const xiNames = mineTeam ? mineTeam.xi.map((id) => mineTeam.players.find((p) => p.id === id)?.name ?? "") : [];
+  const xiNames = mineTeam ? mineTeam.xi.map((id) => `${mineTeam.players.find((p) => p.id === id)?.name ?? ""}${id === mineTeam.captain ? " (c)" : ""}`) : [];
   const subName = mineTeam?.impact ? mineTeam.players.find((p) => p.id === mineTeam.impact)?.name : null;
 
   async function step(how: "next" | "mine" | "end", thenWatch = false) {

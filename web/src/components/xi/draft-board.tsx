@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fmt, ROLE_LABEL } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView } from "@/lib/xi";
+import { captainText, isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView, type LineupSlot, type XIFormat } from "@/lib/xi";
 
 const MAX_OVERSEAS = 4;
 const ROLL_MS = 1100;
@@ -129,6 +129,7 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
   }
 
   const shown = view !== null && view < d.spins.length ? d.spins[view] : null;
+  const captainId = d.captain ?? d.captain_auto;
   const latest = d.spins[d.spins.length - 1];
 
   return (
@@ -202,6 +203,16 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
                     {!p && !moving && <CrosshairIcon className={cn("size-3.5", aim === pos.slot ? "text-signal" : "text-muted-foreground/50")} />}
                   </button>
                   {p && !moving && (
+                    <button type="button" onClick={() => act(() => xiApi.captain(d.id, d.captain === p.id ? null : p.id))} disabled={busy}
+                      aria-pressed={captainId === p.id} title={captainId === p.id ? (d.captain ? "Your captain (tap to let the engine choose)" : "Leads if you don't choose: best captaincy record in your XI") : "Make captain"}
+                      className={cn("grid size-6 shrink-0 place-items-center font-mono text-[10px] font-bold",
+                        d.captain === p.id ? "bg-signal text-signal-foreground"
+                          : captainId === p.id ? "border border-signal text-signal"
+                          : "border border-transparent text-muted-foreground/60 hover:border-border hover:text-foreground")}>
+                      C
+                    </button>
+                  )}
+                  {p && !moving && (
                     <button type="button" aria-label={`Remove ${p.name}`} onClick={() => remove(pos.slot)} disabled={busy}
                       className="px-2.5 py-3 text-muted-foreground hover:text-foreground"><XIcon className="size-3.5" /></button>
                   )}
@@ -213,6 +224,7 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
               );
             })}
           </ol>
+          <CaptainLine lineup={d.lineup} chosen={d.captain} captainId={captainId} format={format} />
           <p className="mt-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
             1–2 openers · 3–6 batters, keepers, all-rounders · 6 is the keeper&apos;s unless one bats higher ·
             7–8 all-rounders or spinners · 9–11 bowlers or all-rounders
@@ -295,6 +307,9 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
                               <span className="mr-0.5 font-semibold">{c.name}</span>
                               {c.kind === "legend" && <Badge className="bg-signal font-mono text-[9px] text-signal-foreground">Legend</Badge>}
                               {c.opener && <Badge variant="secondary" className="font-mono text-[9px]">Opener</Badge>}
+                              {c.captaincy && c.captaincy.matches >= 5 && (
+                                <Badge variant="outline" className="border-signal/50 font-mono text-[9px] text-signal" title={captainText(c.captaincy)}>Capt</Badge>
+                              )}
                               {c.spinner && <Badge variant="secondary" className="font-mono text-[9px]">Spin</Badge>}
                               {format === "IPL" && isOverseas(c) && <Badge variant="outline" className="font-mono text-[9px]">OS</Badge>}
                             </div>
@@ -362,5 +377,25 @@ function Rule({ ok, label, neutral }: { ok: boolean; label: string; neutral?: bo
       {ok ? <CheckIcon className="size-3.5 text-signal" weight="bold" /> : <CircleIcon className="size-3.5" />}
       {label}
     </span>
+  );
+}
+
+
+/** Who leads, and why: their real captaincy record drives the toss call and bowling changes. */
+function CaptainLine({ lineup, chosen, captainId, format }: { lineup: LineupSlot[]; chosen: string | null; captainId: string | null; format: XIFormat }) {
+  const p = lineup.find((s) => s.player?.id === captainId)?.player;
+  return (
+    <div className="mt-3 border-l-2 border-signal/60 pl-3 text-xs">
+      <div className="label">Captain{chosen ? "" : " · engine's pick"}</div>
+      {p ? (
+        <div>
+          <span className="font-semibold">{p.name}</span>{" "}
+          <span className="text-muted-foreground">{p.captaincy ? captainText(p.captaincy) : `no ${XI_COPY[format].title} captaincy record`}</span>
+        </div>
+      ) : (
+        <div className="text-muted-foreground">Picks the best captaincy record in your XI. Tap C on a player to choose.</div>
+      )}
+      <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">Calls the toss and runs the bowling: a better record, fewer bad calls.</div>
+    </div>
   );
 }

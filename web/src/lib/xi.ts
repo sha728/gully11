@@ -33,7 +33,14 @@ export interface Candidate {
   spinner: boolean;
   /** Batting positions (1-11) this player may take. */
   slots: number[];
+  /** Their real captaincy record in this format (or the closest one), if any. */
+  captaincy?: CaptainRecord | null;
 }
+
+/** A captaincy record and the tactical rating (0..1) it gives in the simulator. */
+export interface CaptainRecord { format: string; matches: number; won: number; lost: number; win_pct: number | null; rating: number }
+
+export interface CaptainInfo { id: string | null; name: string | null; rating: number; record: CaptainRecord | null }
 
 export interface Position {
   slot: number;
@@ -78,6 +85,9 @@ export interface DraftView {
   lineup: LineupSlot[];
   can_spin: boolean;
   waiting: boolean;
+  /** Your chosen captain (a pick), and who leads if you don't choose. */
+  captain: string | null;
+  captain_auto: string | null;
   status: { picked: number; openers: number; keeper_top6: boolean; overseas: number | null; ready: boolean };
 }
 
@@ -111,6 +121,8 @@ export interface Challenge {
   result: SeriesResult;
   matches: MatchSummary[];
   created_at?: string;
+  captain?: string | null;
+  captains?: { mine: CaptainInfo; them: CaptainInfo } | null;
 }
 
 export interface BallEvent {
@@ -154,6 +166,7 @@ export interface FullMatch {
   result: "win" | "draw" | "tie";
   commentary: BallEvent[];
   win_prob: [string, number][];
+  toss?: { winner: string; decision: "bat" | "bowl"; captain: string | null; called_right: boolean } | null;
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -192,6 +205,7 @@ export const xiApi = {
     call<DraftView>(`${draftPath(id)}/pick`, post({ spin, player, slot })),
   unpick: (id: string, spin: number) => call<DraftView>(`${draftPath(id)}/pick/${spin}`, { method: "DELETE" }),
   move: (id: string, from: number, to: number) => call<DraftView>(`${draftPath(id)}/move`, post({ from, to })),
+  captain: (id: string, player: string | null) => call<DraftView>(`${draftPath(id)}/captain`, post({ player })),
   play: (id: string) => call<{ slug: string; rival: string | null }>(`${draftPath(id)}/play`, post()),
   challenge: (slug: string) => call<Challenge>(`/xi/challenge/${encodeURIComponent(slug)}`),
   match: (slug: string, n: number) => call<FullMatch>(`/xi/challenge/${encodeURIComponent(slug)}/match/${n}`),
@@ -199,3 +213,9 @@ export const xiApi = {
 
 export const isOverseas = (c: Pick<Candidate, "country">) => !!c.country && c.country !== "India";
 export const KEEPER_SLOT = 6;
+
+/** "Captained 68 Tests, won 59%" */
+export function captainText(r: CaptainRecord): string {
+  const unit = r.format === "IPL" ? "IPL matches" : `${r.format}s`;
+  return `Captained ${r.matches} ${unit}${r.win_pct != null ? `, won ${Math.round(r.win_pct)}%` : ""}`;
+}

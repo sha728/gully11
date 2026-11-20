@@ -36,8 +36,23 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("simbase", help="Write the simulator's base_rates.json from parsed data")
     sub.add_parser("names", help="Fetch full names + Wikipedia titles from Wikidata")
     sub.add_parser("auction2026", help="IPL 2026 auction + retentions from Wikipedia (mini mode)")
+    sub.add_parser("captains", help="Captaincy records from Wikipedia (Test/ODI/T20I/IPL)")
 
     args = p.parse_args(argv)
+
+    if args.cmd == "captains":
+        from collections import Counter
+        from .captains import OUT, build
+        res = build()
+        rows = res["rows"]
+        print(f"{len(rows)} captain-format rows -> {OUT}")
+        print("  per format:", dict(Counter(r["format"] for r in rows)))
+        print("  matched to a player id:", dict(Counter(r["format"] for r in rows if r["player_id"])))
+        print("  matched to a legend:", dict(Counter(r["format"] for r in rows if r["legend_id"])))
+        for r in res["dropped"]:
+            print(f"  dropped (results exceed matches): {r['format']} {r['name']} {r['matches']} "
+                  f"W{r['won']} L{r['lost']} T{r['tied']} D{r['drawn']} NR{r['nr']}")
+        return
 
     if args.cmd == "auction2026":
         from collections import Counter

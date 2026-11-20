@@ -175,3 +175,7 @@ and economy (McGrath 21.6 at 2.49).
 
 log5 combination, shrinkage strengths, chase-intent exponents, conditions
 factor, the calibration step, and keeping death bowlers' last overs.
+
+## Captaincy
+
+`gully-pipeline captains` reads Wikipedia captain lists (IPL + each Test nation, CC BY-SA) into `api/src/gully_api/sim/data/captains.csv`. A captain's rating (0..1) = experience x shrunk win rate (`sim/captaincy.py`); it drives the toss call and bowling changes only, never batting or bowling skill. Measured edge of a 0.9 captain over none: T20 +1.5 pts, ODI +4.4, Test ~+2.

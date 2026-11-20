@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from ..db import get_conn
+from ..sim import captaincy
 from . import service
 from .draft import Draft, reel
 from .service import FORMATS, DraftError
@@ -56,6 +57,10 @@ class Pick(BaseModel):
     slot: int | None = Field(None, ge=1, le=11, description="omit to take the best legal slot")
 
 
+class Captain(BaseModel):
+    player: str | None = None        # one of your picks; None = let the engine choose
+
+
 class Move(BaseModel):
     src: int = Field(ge=1, le=11, alias="from")
     dst: int = Field(ge=1, le=11, alias="to")
@@ -74,9 +79,13 @@ def _draft(conn, row: dict) -> Draft:
 
 
 def _view(conn, row: dict) -> dict[str, Any]:
+    picked = [p["id"] for p in row["picks"] if p]
+    chosen = row.get("captain") if row.get("captain") in picked else None
     return {"id": row["id"], "format": row["format"], "seed": row["seed"],
             "daily": row["daily"].isoformat() if row["daily"] else None, "rival": row["rival"],
             "challenge": row["challenge"], "positions": service.SLOTS, "reel": reel(conn, row["format"]),
+            # Captain: the one picked, else the best-rated captain so far (who leads if you don't choose).
+            "captain": chosen, "captain_auto": captaincy.best(picked, row["format"]) if picked else None,
             **_draft(conn, row).view()}
 
 
@@ -168,6 +177,18 @@ def move(draft_id: str, req: Move, conn=Depends(get_conn)) -> dict[str, Any]:
     return _act(conn, draft_id, lambda d: d.move(req.src, req.dst))
 
 
+@router.post("/drafts/{draft_id}/captain")
+def set_captain(draft_id: str, req: Captain, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Name your captain (one of the players you've picked)."""
+    row = _load(conn, draft_id, lock=True)
+    _editable(row)
+    if req.player and req.player not in [p["id"] for p in row["picks"] if p]:
+        raise HTTPException(422, "Your captain has to be in your XI.")
+    row = _save(conn, row, captain=req.player)
+    conn.commit()
+    return _view(conn, row)
+
+
 @router.post("/drafts/{draft_id}/play")
 def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
     """Play the drafted XI: five seeded matches against the Greats, saved under a
@@ -181,15 +202,18 @@ def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
     picks = [p["id"] for p in row["picks"]]
     slots = [p["slot"] for p in row["picks"]]
     try:
-        out = service.play_series(conn, row["format"], row["seed"], picks, slots)
+        out = service.play_series(conn, row["format"], row["seed"], picks, slots,
+                                  captain=row.get("captain") if row.get("captain") in picks else None)
     except DraftError as e:
         raise HTTPException(422, str(e)) from e
     full = out.pop("_full")
     conn.execute(
         """INSERT INTO xi_challenges (slug, format, seed, daily, picks, xi, opponent, result, matches)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (slug) DO NOTHING""",
-        (out["slug"], row["format"], row["seed"], row["daily"], Jsonb({"ids": picks, "slots": slots}),
-         Jsonb(out["xi"]), out["opponent"], Jsonb(out["result"]), Jsonb(out["matches"])))
+        (out["slug"], row["format"], row["seed"], row["daily"],
+         Jsonb({"ids": picks, "slots": slots, "captain": out["captains"]["mine"]["id"]}),
+         Jsonb(out["xi"]), out["opponent"], Jsonb({**out["result"], "captains": out["captains"]}),
+         Jsonb(out["matches"])))
     for i, m in enumerate(full, start=1):
         conn.execute(
             "INSERT INTO sim_results (context, ref, match_no, match_json) VALUES ('xi', %s, %s, %s) "
@@ -209,8 +233,10 @@ def challenge(slug: str, conn=Depends(get_conn)) -> dict[str, Any]:
     if row is None:
         raise HTTPException(404, "Challenge not found")
     row["daily"] = row["daily"].isoformat() if row["daily"] else None
-    if isinstance(row["picks"], dict):   # {"ids", "slots"}; early challenges stored ids only
+    if isinstance(row["picks"], dict):   # {"ids", "slots", "captain"}; early challenges stored ids only
+        row["captain"] = row["picks"].get("captain")
         row["picks"], row["slots"] = row["picks"]["ids"], row["picks"]["slots"]
+    row["captains"] = (row["result"] or {}).get("captains")
     return row
 
 

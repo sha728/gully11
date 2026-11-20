@@ -375,19 +375,32 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
       <div className="grid gap-10 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <section className="space-y-2">
           <div className="label">Points table</div>
-          <table className="w-full text-sm">
+          {/* Fixed column widths: the numbers line up under their headings. */}
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-7" /><col />
+              <col className="w-9" /><col className="w-9" /><col className="w-9" /><col className="w-9" />
+              <col className="w-11" /><col className="w-[4.5rem]" />
+            </colgroup>
             <thead>
               <tr className="font-mono text-[10px] text-muted-foreground uppercase">
-                {["#", "Team", "P", "W", "L", "T", "Pts", "NRR"].map((h, i) => <th key={h} className={cn("py-1.5 font-normal", i > 1 ? "text-right" : "text-left")}>{h}</th>)}
+                <th className="py-1.5 text-left font-normal">#</th>
+                <th className="text-left font-normal">Team</th>
+                {[["P", "Played"], ["W", "Won"], ["L", "Lost"], ["T", "Tied"], ["Pts", "Points"], ["NRR", "Net run rate"]].map(([h, title]) => (
+                  <th key={h} title={title} className="text-right font-normal">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y border-y font-mono tnum">
               {season.table.map((r, i) => (
                 <tr key={r.team} className={cn(idOf[r.team] === you && "bg-signal/10", i === 3 && "border-b-2 border-b-signal/60")}>
                   <td className="py-1.5 text-muted-foreground">{i + 1}</td>
-                  <td className="font-sans">{r.team}{idOf[r.team] === you && <span className="ml-1 font-mono text-[10px] text-signal">YOU</span>}</td>
-                  <td className="text-right">{r.played}</td><td className="text-right">{r.won}</td><td className="text-right">{r.lost}</td>
-                  <td className="text-right">{r.tied}</td><td className="text-right font-semibold">{r.points}</td>
+                  <td className="truncate font-sans">{r.team}{idOf[r.team] === you && <span className="ml-1 font-mono text-[10px] text-signal">YOU</span>}</td>
+                  <td className="text-right">{r.played}</td>
+                  <td className="text-right">{r.won}</td>
+                  <td className="text-right">{r.lost}</td>
+                  <td className="text-right">{r.tied}</td>
+                  <td className="text-right font-semibold">{r.points}</td>
                   <td className="text-right">{r.nrr >= 0 ? "+" : ""}{r.nrr.toFixed(3)}</td>
                 </tr>
               ))}

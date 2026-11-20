@@ -1,7 +1,7 @@
 /** Ball-by-ball replay state, rebuilt from a match's commentary. Pure functions:
  * the state after any number of deliveries, and the match's key moments. */
 
-import type { BallEvent, FullMatch } from "@/lib/xi";
+import { cardFor, superOverNo, type BallEvent, type FullMatch } from "@/lib/xi";
 
 export interface AtCrease {
   name: string;
@@ -63,8 +63,9 @@ export function glyph(e: BallEvent): string {
 export function liveState(match: FullMatch, cursor: number, ballsPerInnings: number | null): LiveState {
   const balls = match.commentary.slice(0, cursor);
   const inns = balls.length ? balls[balls.length - 1].inns : 1;
-  const card = match.innings[inns - 1];
+  const card = cardFor(match, inns);
   const order = card?.batting_card.map((b) => b.name) ?? [];
+  const superOver = superOverNo(match, inns) > 0;
   const bat: Record<string, AtCrease> = {};
   const enter = (name: string) => (bat[name] ??= { name, runs: 0, balls: 0, fours: 0, sixes: 0, striker: false });
   let crease = order.slice(0, 2).map(enter);
@@ -98,7 +99,7 @@ export function liveState(match: FullMatch, cursor: number, ballsPerInnings: num
       const out = bat[e.out ?? ""] ?? striker;
       lastWicket = `${out.name} ${out.runs} (${out.balls}) · ${e.how ?? "out"}`;
       crease = crease.filter((c) => c.name !== out.name);
-      if (wickets < 10 && next < order.length) crease.push(enter(order[next++]));
+      if (wickets < order.length - 1 && next < order.length) crease.push(enter(order[next++]));
       pRuns = 0; pBalls = 0;
     }
     // Whoever faced this ball stays visible at the crease even if the card order differs.
@@ -112,6 +113,7 @@ export function liveState(match: FullMatch, cursor: number, ballsPerInnings: num
   crease.forEach((c) => (c.striker = c.name === onStrike));
   const bowler = last ? { name: last.bowler, ...bowl[last.bowler] } : null;
   const target = card?.target ?? null;
+  const perInnings = superOver ? 6 : ballsPerInnings;
   const ended = cursor >= match.commentary.length;
   return {
     started: cursor > 0,
@@ -125,7 +127,7 @@ export function liveState(match: FullMatch, cursor: number, ballsPerInnings: num
     thisOver,
     partnership: { runs: pRuns, balls: pBalls },
     target,
-    need: target && ballsPerInnings ? { runs: Math.max(0, target - runs), balls: Math.max(0, ballsPerInnings - legalBalls) } : null,
+    need: target && perInnings ? { runs: Math.max(0, target - runs), balls: Math.max(0, perInnings - legalBalls) } : null,
     lastWicket,
     ended,
   };
@@ -140,8 +142,11 @@ export function keyMoments(match: FullMatch, isTest: boolean): Moment[] {
   let inns = 0;
   const ev = match.commentary;
   ev.forEach((e, i) => {
-    if (e.inns !== inns) { inns = e.inns; runsBy = {}; wktsBy = {}; }
     const at = i + 1;
+    if (e.inns !== inns) {
+      inns = e.inns; runsBy = {}; wktsBy = {};
+      if (superOverNo(match, inns) === 1) out.push({ at, inns, ball: e.ball, kind: "innings", label: "Scores level: super over!" });
+    }
     if (e.text.startsWith("Captain's hunch")) out.push({ at, inns, ball: e.ball, kind: "hunch", label: `Hunch: ${e.bowler} has a bowl` });
     const before = runsBy[e.batter] ?? 0;
     const after = before + (e.kind === "wide" ? 0 : e.bat_runs ?? 0);
@@ -157,8 +162,11 @@ export function keyMoments(match: FullMatch, isTest: boolean): Moment[] {
       }
     }
     if (!ev[i + 1] || ev[i + 1].inns !== e.inns) {
-      const card = match.innings[e.inns - 1];
-      out.push({ at, inns, ball: e.ball, kind: "innings", label: `End of innings: ${card?.runs}/${card?.wickets}${card?.declared ? "d" : ""}` });
+      const card = cardFor(match, e.inns);
+      const so = superOverNo(match, e.inns);
+      out.push({ at, inns, ball: e.ball, kind: "innings", label: so
+        ? `End of super over: ${card?.runs}/${card?.wickets}`
+        : `End of innings: ${card?.runs}/${card?.wickets}${card?.declared ? "d" : ""}` });
     }
   });
   return out;
@@ -173,7 +181,9 @@ export function overEnds(match: FullMatch): Map<number, string> {
     overRuns += e.runs;
     const n = ev[i + 1];
     if (!n || n.inns !== e.inns || overOf(n) !== overOf(e)) {
-      ends.set(i, `End of over ${overOf(e) + 1}: ${e.score} · ${overRuns} from the over`);
+      ends.set(i, superOverNo(match, e.inns)
+        ? `End of super over: ${e.score}`
+        : `End of over ${overOf(e) + 1}: ${e.score} · ${overRuns} from the over`);
       overRuns = 0;
     }
   });

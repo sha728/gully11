@@ -148,8 +148,9 @@ class MatchResult:
     margin: str
     commentary: list[dict]
     win_prob: list[tuple[str, float]]   # (ball label, P(team batting first wins)); limited overs only
-    result: str = "win"         # win / tie / draw
+    result: str = "win"         # win / tie / draw / super over
     toss: dict | None = None    # {"winner", "decision", "captain", "called_right"}
+    super_overs: list[Innings] = field(default_factory=list)   # in order played (pairs)
 
     def to_dict(self) -> dict:
         return {
@@ -157,6 +158,7 @@ class MatchResult:
             "innings": [i.to_dict() for i in self.innings],
             "winner": self.winner, "margin": self.margin, "result": self.result,
             "commentary": self.commentary, "win_prob": self.win_prob, "toss": self.toss,
+            "super_overs": [i.to_dict() for i in self.super_overs],
         }
 
 
@@ -314,14 +316,17 @@ class _Match:
     # -- one innings -----------------------------------------------------
     def innings(self, bat_team: Team, bowl_team: Team, innings_no: int,
                 target: int | None, max_overs: int | None = None,
-                declare: "Callable[[Innings], bool] | None" = None) -> Innings:
+                declare: "Callable[[Innings], bool] | None" = None,
+                super_over: tuple[list[Profile], str] | None = None) -> Innings:
         """One innings. Limited overs: ``max_overs`` = the format's overs and bowler
         quotas apply. Tests: ``max_overs`` = time left in the match, no quotas, and
-        ``declare`` is asked at the end of each over."""
+        ``declare`` is asked at the end of each over. ``super_over`` = (the three
+        batters sent in, the bowler's id): one over, two wickets, death-overs rates."""
         env, rng = self.env, self.rng
         max_overs = env.overs if max_overs is None else max_overs
         inn = Innings(batting=bat_team.name, bowling=bowl_team.name, target=target)
-        batters = bat_team.players
+        batters = super_over[0] if super_over else bat_team.players
+        max_wickets = len(batters) - 1
         for p in batters:
             inn.bat[p.id] = BatLine(p.name)
         squad = bowl_team.players + bowl_team.impact
@@ -341,12 +346,12 @@ class _Match:
         n_balls = max_overs * 6
 
         def done() -> bool:
-            return (inn.wickets >= 10 or inn.legal_balls >= n_balls
+            return (inn.wickets >= max_wickets or inn.legal_balls >= n_balls
                     or (target is not None and inn.runs >= target))
 
         # Luck: now and then the captain gives a batter who can bowl a middle over.
         hunch, hunch_over, announced = None, -1, False
-        if not env.is_test:
+        if not env.is_test and not super_over:
             arms = [p.id for p in bowl_team.players
                     if p.role not in WICKET_ROLES and p.id != keeper and p.wickets >= PART_TIMER_MIN_WICKETS]
             middle = [o for o in range(max_overs) if env.phase(o) == "middle"]
@@ -356,8 +361,10 @@ class _Match:
         for over in range(max_overs):
             if done():
                 break
-            phase = env.phase(over)
-            if over == hunch_over and hunch != last_bowler and left[hunch] > 0:
+            phase = "death" if super_over else env.phase(over)
+            if super_over:
+                bid = super_over[1]
+            elif over == hunch_over and hunch != last_bowler and left[hunch] > 0:
                 bid = hunch
             else:
                 bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
@@ -387,7 +394,9 @@ class _Match:
                     v = self.combined(bat, bowler, phase)
                     if self.wear:
                         v = self._worn(v, innings_no)
-                    if target is not None:
+                    if super_over:
+                        v = _aggression(v, self._super_over_intent(inn, target))
+                    elif target is not None:
                         a = (self._test_chase_intent(inn, target, max_overs) if env.is_test
                              else self._chase_aggression(inn, target))
                         v = _aggression(v, a)
@@ -424,7 +433,7 @@ class _Match:
                                 f"{inn.runs}-{inn.wickets} ({out.name}, {inn.overs} ov)")
                             event.update(kind="wicket", runs=0, out=out.name, how=how,
                                          wicket_kind=kind, fielder=fielder)
-                            if inn.wickets < 10 and next_in < 11:
+                            if inn.wickets < max_wickets and next_in < len(batters):
                                 inn.bat[batters[next_in].id].how_out = "not out"
                                 if out_idx == striker:
                                     striker = next_in
@@ -453,7 +462,7 @@ class _Match:
                         announced = True
                         event["text"] = f"Captain's hunch: {bowler.name} has a bowl. " + event["text"]
                     self.commentary.append(event)
-                    if not env.is_test:
+                    if not env.is_test and not super_over:
                         self.win_prob.append(
                             (f"{innings_no}:{ball_label}", round(self.p_first_wins(inn, innings_no), 4)))
 
@@ -485,6 +494,16 @@ class _Match:
         if rate > 5.0 or (inn.wickets >= 6 and rate > 4.0):
             return 0.75    # bat for the draw
         return min((rate / par) ** 0.5, 1.3)
+
+    @staticmethod
+    def _super_over_intent(inn: Innings, target: int | None) -> float:
+        """Six balls, two wickets: go hard. Setting a total, flat out; chasing,
+        by the rate needed (about 2 a ball is par for a super over)."""
+        if target is None:
+            return SUPER_OVER_INTENT
+        balls_left = max(1, 6 - inn.legal_balls)
+        rate = (target - inn.runs) / balls_left
+        return min(max(rate / 2.0, 0.8), 1.8) ** 0.5 * SUPER_OVER_INTENT ** 0.5
 
     def _chase_aggression(self, inn: Innings, target: int) -> float:
         need = target - inn.runs
@@ -524,6 +543,8 @@ class _Match:
 
 
 BOWLING_TEMP = 0.12      # spread of bowling choices for a middling captain
+SUPER_OVER_INTENT = 1.9  # aggression in a super over (see _aggression)
+MAX_SUPER_OVERS = 4      # repeat tied super overs; past this, most boundaries in the match wins
 
 
 def _toss(rng, a: Team, b: Team, env: Env) -> tuple[int, dict]:
@@ -541,10 +562,75 @@ def _toss(rng, a: Team, b: Team, env: Env) -> tuple[int, dict]:
                                         "captain": captain, "called_right": right}
 
 
+def _super_over_picks(m: "_Match", bat: Team, bowl: Team, out_before: set[str],
+                      bowled_before: set[str]) -> tuple[list[Profile], str]:
+    """The captains' choices for a super over: three batters (best death-overs
+    hitters, never anyone dismissed in an earlier super over) and one bowler (best
+    death bowler, never the bowler of an earlier one). A sharper captain picks
+    closer to the best, as with bowling changes."""
+    def hit(p: Profile) -> float:
+        rpb, wk = expected(p.bat["death"])
+        return rpb - 2 * wk
+
+    def bowl_value(p: Profile) -> float:
+        rpb, wk = expected(p.bowl["death"])
+        return 20 * wk - rpb - (p.wide["death"] + p.noball["death"])
+
+    def choose(pool: list[Profile], score, team: Team, n: int) -> list[Profile]:
+        temp = BOWLING_TEMP * (1.6 - 1.2 * team.captaincy)
+        pool, out = list(pool), []
+        for _ in range(min(n, len(pool))):
+            s = [score(p) for p in pool]
+            top = max(s)
+            w = [math.exp((x - top) / temp) for x in s]
+            out.append(pool.pop(_pick(m.rng, [x / sum(w) for x in w])))
+        return out
+
+    batters = choose([p for p in bat.players if p.id not in out_before], hit, bat, 3)
+    by_id = {p.id: p for p in bowl.players + bowl.impact}
+    options = [by_id[b] for b in bowl.bowling_options() if b not in bowled_before]
+    if not options:
+        options = [p for p in bowl.players if p.id not in bowled_before and p.id != bowl.keeper_id()]
+    return batters, choose(options, bowl_value, bowl, 1)[0].id
+
+
+def _super_overs(m: "_Match", first: Team, second: Team, i1: Innings, i2: Innings
+                 ) -> tuple[str, str, list[Innings]]:
+    """Settle a tie: the side that batted second bats first in the super over.
+    A tied super over is played again (dismissed batters and the previous bowler
+    can't take part, ICC rules). Returns (winner, margin, the super-over innings)."""
+    played: list[Innings] = []
+    out: dict[str, set[str]] = {first.name: set(), second.name: set()}
+    bowled: dict[str, set[str]] = {first.name: set(), second.name: set()}
+    a, b = second, first
+    for k in range(MAX_SUPER_OVERS):
+        pa = _super_over_picks(m, a, b, out[a.name], bowled[b.name])
+        sa = m.innings(a, b, 3 + 2 * k, None, max_overs=1, super_over=pa)
+        pb = _super_over_picks(m, b, a, out[b.name], bowled[a.name])
+        sb = m.innings(b, a, 4 + 2 * k, sa.runs + 1, max_overs=1, super_over=pb)
+        played += [sa, sb]
+        for inn, team in ((sa, a), (sb, b)):
+            out[team.name] |= {pid for pid, line in inn.bat.items() if line.how_out not in (None, "not out")}
+        bowled[b.name].add(pa[1])
+        bowled[a.name].add(pb[1])
+        again = "" if k == 0 else f" (super over {k + 1})"
+        if sb.runs > sa.runs:
+            return b.name, f"won the super over{again} ({sb.runs}/{sb.wickets} to {sa.runs}/{sa.wickets})", played
+        if sa.runs > sb.runs:
+            return a.name, f"won the super over{again} ({sa.runs}/{sa.wickets} to {sb.runs}/{sb.wickets})", played
+        a, b = b, a     # the next super over: the other side bats first
+    fours = {t.name: sum(line.fours + line.sixes for inn in (i1, i2, *played)
+                         if inn.batting == t.name for line in inn.bat.values()) for t in (first, second)}
+    win = max((first, second), key=lambda t: (fours[t.name], t is second)).name
+    return win, f"won on boundary count ({fours[win]}) after {MAX_SUPER_OVERS} tied super overs", played
+
+
 def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
-                   bat_first: int | None = None, commentary: bool = True) -> MatchResult:
+                   bat_first: int | None = None, commentary: bool = True,
+                   super_over: bool | None = None) -> MatchResult:
     """Simulate one limited-overs match. ``bat_first``: 0 = team_a, 1 = team_b,
-    None = decided by a seeded toss."""
+    None = decided by a seeded toss. ``super_over``: settle a tie with a super over
+    (default: in T20s, as in the IPL and T20Is; ODI ties stand)."""
     if isinstance(env, str):
         env = load_env(env)
     if env.is_test:
@@ -563,9 +649,13 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
         winner, margin = first.name, f"won by {_n(i1.runs - i2.runs, 'run')}"
     else:
         winner, margin = None, "match tied"
+    result, extra = ("win" if winner else "tie"), []
+    if winner is None and (env.overs <= 20 if super_over is None else super_over):
+        winner, margin, extra = _super_overs(m, first, second, i1, i2)
+        result = "super over"
     return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name),
-                       innings=[i1, i2], winner=winner, margin=margin,
-                       commentary=m.commentary, win_prob=m.win_prob)
+                       innings=[i1, i2], winner=winner, margin=margin, result=result,
+                       commentary=m.commentary, win_prob=m.win_prob, super_overs=extra)
 
 
 # ---------------------------------------------------------------- Tests (beta)

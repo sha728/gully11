@@ -173,8 +173,8 @@ function MatchCard({ m, slug, them }: { m: MatchSummary; slug: string; them: str
       <div className="flex items-baseline justify-between">
         <span className="label">Match {m.match}</span>
         <span className={cn("font-mono text-[11px] font-semibold uppercase",
-          m.result === "win" ? (mine ? "text-signal" : "text-muted-foreground") : "text-chart-2")}>
-          {m.result === "win" ? (mine ? "Won" : "Lost") : m.result === "draw" ? "Drawn" : "Tied"}
+          m.winner ? (mine ? "text-signal" : "text-muted-foreground") : "text-chart-2")}>
+          {m.winner ? (mine ? "Won" : "Lost") + (m.result === "super over" ? " · super over" : "") : m.result === "draw" ? "Drawn" : "Tied"}
         </span>
       </div>
       <div className="space-y-1 font-mono text-xs tnum">

@@ -94,7 +94,7 @@ export interface DraftView {
 export interface MatchSummary {
   match: number;
   winner: string | null;
-  result: "win" | "draw" | "tie";
+  result: "win" | "draw" | "tie" | "super over";
   margin: string;
   scores: { team: string; runs: number; wickets: number; overs: string; declared: boolean }[];
   top_scorer: { name: string; runs: number; balls: number };
@@ -163,9 +163,11 @@ export interface FullMatch {
   innings: InningsCard[];
   winner: string | null;
   margin: string;
-  result: "win" | "draw" | "tie";
+  result: "win" | "draw" | "tie" | "super over";
   commentary: BallEvent[];
   win_prob: [string, number][];
+  /** A tie settled by super overs: their innings, in order (one over each). */
+  super_overs?: InningsCard[];
   toss?: { winner: string; decision: "bat" | "bowl"; captain: string | null; called_right: boolean } | null;
 }
 
@@ -218,4 +220,14 @@ export const KEEPER_SLOT = 6;
 export function captainText(r: CaptainRecord): string {
   const unit = r.format === "IPL" ? "IPL matches" : `${r.format}s`;
   return `Captained ${r.matches} ${unit}${r.win_pct != null ? `, won ${Math.round(r.win_pct)}%` : ""}`;
+}
+
+/** The innings a commentary ball belongs to: 1.. the match innings, then the super overs. */
+export function cardFor(match: FullMatch, inns: number): InningsCard | undefined {
+  return inns <= match.innings.length ? match.innings[inns - 1] : match.super_overs?.[inns - match.innings.length - 1];
+}
+
+/** 0 for a regular innings, else which super-over innings (1, 2, ...). */
+export function superOverNo(match: FullMatch, inns: number): number {
+  return Math.max(0, inns - match.innings.length);
 }

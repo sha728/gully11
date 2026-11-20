@@ -89,7 +89,7 @@ def test_innings_and_scorecard_rules(env_name, overs):
             outs = [x for x in inn.bat.values() if x.how_out not in (None, "not out")]
             assert len(outs) == inn.wickets == len(inn.fall_of_wickets)
         # the chase stops as soon as the target is reached
-        if r.winner == r.teams[1]:
+        if r.winner == r.teams[1] and r.result == "win":
             assert 0 <= i2.runs - i2.target <= 6
             assert "wicket" in r.margin
         # no bowler bowls two overs in a row
@@ -213,11 +213,14 @@ def test_win_probability_series(env):
     for seed in range(10):
         r = simulate_match(a, b, env, seed)
         probs = [p for _, p in r.win_prob]
-        assert len(probs) == len(r.commentary)
+        # regulation balls only: a super over has no win-probability line
+        assert len(probs) == sum(e["inns"] <= 2 for e in r.commentary)
         assert all(0.0 <= p <= 1.0 for p in probs)
         assert 0.2 < probs[0] < 0.8
         final = probs[-1]
-        if r.winner == r.teams[0]:
+        if r.result == "super over":
+            assert final == pytest.approx(0.5, abs=0.5)
+        elif r.winner == r.teams[0]:
             assert final > 0.9
         elif r.winner == r.teams[1]:
             assert final < 0.1
@@ -294,3 +297,42 @@ def test_legend_profile_reproduces_career():
     rpb, w = expected(vec)
     assert rpb / w == pytest.approx(21.6, rel=0.05) and 6 * rpb == pytest.approx(2.49, rel=0.05)
     assert p.estimated and p.meta["sr_estimated"]
+
+
+def _tied(env, a, b, n=4000):
+    """Seeds whose regulation match ends level (found by playing them)."""
+    out = []
+    for s in range(n):
+        m = simulate_match(a, b, env, s, commentary=False, super_over=False)
+        if m.winner is None:
+            out.append(s)
+    return out
+
+
+def test_super_over_settles_ties(env):
+    a, b = avg_team("A", env), avg_team("B", env)
+    seeds = _tied(env, a, b)
+    assert seeds, "expected some ties in 4,000 matches"
+    for s in seeds:
+        m = simulate_match(a, b, env, s)
+        plain = simulate_match(a, b, env, s, super_over=False)
+        # the 40 overs are untouched; the super over only comes after
+        assert [i.runs for i in m.innings] == [i.runs for i in plain.innings]
+        assert m.result == "super over" and m.winner in m.teams
+        so = m.super_overs
+        assert so and len(so) % 2 == 0
+        assert so[0].batting == m.teams[1]          # the side that chased bats first
+        for inn in so:
+            assert inn.legal_balls <= 6 and inn.wickets <= 2
+            assert sum(1 for line in inn.bat.values() if line.how_out) <= 3
+            assert len([b for b in inn.bowl.values() if b.balls]) == 1
+        assert {e["inns"] for e in m.commentary} >= {3, 4}
+        d = m.to_dict()
+        assert len(d["super_overs"]) == len(so) and len(d["innings"]) == 2
+
+
+def test_odi_ties_stand(env):
+    a, b = avg_team("A", env), avg_team("B", env)
+    s = _tied(env, a, b)[0]
+    m = simulate_match(a, b, env, s, super_over=False)
+    assert m.winner is None and m.result == "tie" and not m.super_overs

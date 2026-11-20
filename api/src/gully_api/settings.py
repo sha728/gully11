@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     # Keys the XI Builder's spin draws. Set a long random value anywhere the site is
     # public; with the default, anyone with the code could compute a draw's spins.
     xi_secret: str = "gully11-dev-secret"
+    # "local" on your machine; anything else (e.g. "dev" on Render) is a hosted site.
+    environment: str = "local"
 
 
+DEV_SECRET = "gully11-dev-secret"
 settings = Settings()
+
+if settings.environment != "local" and settings.xi_secret == DEV_SECRET:
+    raise RuntimeError("XI_SECRET must be set on a hosted site: with the default, anyone "
+                       "with the source code could work out every XI Builder draw.")

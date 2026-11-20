@@ -54,6 +54,10 @@ API at `http://127.0.0.1:8000` (override with `NEXT_PUBLIC_API_URL`): on Windows
 `localhost` tries IPv6 first and every call waits ~0.2 s before falling back to the
 IPv4 address Uvicorn listens on.
 
+## Deploying
+
+The dev site runs on Vercel (web), Render (API) and Neon (Postgres), all on free plans: see [docs/deploy.md](docs/deploy.md).
+
 ## CI
 
 - **CI** (`.github/workflows/ci.yml`, every PR and push to `main`): pipeline tests, API +

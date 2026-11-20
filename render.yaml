@@ -1,0 +1,24 @@
+# Render Blueprint: the Gully11 API for the dev site (free plan).
+# Render: New > Blueprint > pick this repo. It asks for DATABASE_URL (Neon) once.
+# Free plan: the service sleeps after 15 idle minutes (first visit then takes about
+# a minute) and a live auction room is lost if everyone goes idle.
+services:
+  - type: web
+    name: gully11-api-dev
+    runtime: docker
+    rootDir: api
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENVIRONMENT
+        value: dev
+      - key: XI_SECRET
+        generateValue: true          # a random secret, made once by Render
+      - key: DATABASE_URL
+        sync: false                  # paste Neon's connection string when asked
+      - key: CORS_ORIGIN_REGEX       # the Vercel site (and its preview deploys) may call the API
+        value: https://gully11[a-z0-9-]*\.vercel\.app|https?://(localhost|127\.0\.0\.1)(:\d+)?

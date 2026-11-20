@@ -198,20 +198,21 @@ def test_summary_counts_each_unsold_player_once():
 
 
 def test_humans_choose_from_the_rooms_franchises():
+    from gully_api.auction.room import FRANCHISES
     r = room(teams=4, humans=2)
-    you = me(r)
-    bot_team = next(f.id for f in r.franchises.values() if f.bot)
-    old = you.id
-    r.choose(you, bot_team)                            # swap with a bot
-    assert you.id == bot_team and not r.franchises[bot_team].bot
-    assert r.franchises[old].bot and len(r.franchises) == 4
+    old = me(r)
+    bot_team = next(f for f in r.franchises.values() if f.bot)
+    bot_team.squad = [{"id": "p1", "price": 100, "retained": True}]
+    you = r.choose(old, bot_team.id)                   # take a bot's franchise
+    assert you is bot_team and you.token == r.host_token and not you.bot
+    assert you.squad == [{"id": "p1", "price": 100, "retained": True}]   # its squad comes with it
+    assert old.bot and old.token is None and old.squad == [] and len(r.franchises) == 4
     with pytest.raises(AuctionError, match="isn't in this room"):
-        r.choose(you, next(fid for fid, _ in __import__("gully_api.auction.room", fromlist=["FRANCHISES"]).FRANCHISES
-                           if fid not in r.franchises))
-    friend = r.claim("Asha", old)                       # join straight into a chosen team
-    assert friend.id == old
+        r.choose(you, next(fid for fid, _ in FRANCHISES if fid not in r.franchises))
+    friend = r.claim("Asha", old.id)                    # join straight into a chosen team
+    assert friend is old and friend.owner == "Asha" and not friend.bot
     with pytest.raises(AuctionError, match="already taken by Asha"):
-        r.choose(you, old)
+        r.choose(you, old.id)
     r.start(0, r.host_token)
     with pytest.raises(AuctionError, match="fixed"):
         r.choose(you, friend.id)

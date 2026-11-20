@@ -150,7 +150,7 @@ class Room:
             raise AuctionError("Every franchise is taken. Ask the host to add more seats.")
         f.owner, f.token = nickname, secrets.token_urlsafe(16)
         if want:
-            self.choose(f, want)
+            f = self.choose(f, want)
         self._touch()
         return f
 
@@ -164,15 +164,20 @@ class Room:
             raise AuctionError(f"{other.name} is already taken by {other.owner}.")
         return other
 
-    def choose(self, f: Franchise, fid: str) -> None:
-        """Before the start, a human picks which of the room's franchises they are:
-        they swap with the bot (or empty friend's seat) that holds it."""
+    def choose(self, f: Franchise, fid: str) -> Franchise:
+        """Before the start, a human picks which of the room's franchises they run.
+        The person moves; each franchise keeps its own squad and purse (in mini mode,
+        its real retained players), and the seat they leave goes to the bot or empty
+        friend's seat that was there. Returns the franchise they now run."""
         if fid == f.id:
-            return
+            return f
         other = self._check_choice(fid)
-        other.id, other.name, f.id, f.name = f.id, f.name, other.id, other.name
-        self.franchises = {x.id: x for x in self.franchises.values()}
+        for attr in ("owner", "token", "bot"):
+            mine, theirs = getattr(f, attr), getattr(other, attr)
+            setattr(f, attr, theirs)
+            setattr(other, attr, mine)
         self._touch()
+        return other
 
     def by_token(self, token: str | None) -> Franchise | None:
         return next((f for f in self.franchises.values() if token and f.token == token), None)

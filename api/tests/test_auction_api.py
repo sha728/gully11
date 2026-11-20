@@ -124,3 +124,21 @@ def test_mini_room_replays_the_2026_auction(client):
     state = client.get(f"{A}/rooms/{r.json()['code']}").json()
     assert len(state["franchises"]) == 10 and state["mode_name"] == "IPL 2026 auction"
     assert "2520" not in str(state)                                    # no spoilers
+
+
+def test_taking_a_team_in_the_replay_takes_its_real_squad(client):
+    """Taking RCB gives you RCB's retained players and purse, not your old team's."""
+    from gully_api import db
+    from gully_api.auction.mini import build_mini
+    from gully_api.auction.pool import RULES
+    from gully_api.auction.room import Room
+    with db._pool.connection() as conn:
+        m = build_mini(conn)
+    r = Room("SWAPAA", "mini", RULES["mini"], [], 10, 1, seed=3, replay=m)
+    start = r.by_token(r.host_token)
+    target = "RCB" if start.id != "RCB" else "CSK"
+    you = r.choose(start, target)
+    assert you.id == target and r.by_token(r.host_token) is you
+    assert [s["id"] for s in you.squad] == [s["id"] for s in m["squads"][target]]
+    assert you.purse == m["purse"][target]
+    assert [s["id"] for s in r.franchises[start.id].squad] == [s["id"] for s in m["squads"][start.id]]

@@ -13,6 +13,7 @@ const TEAMS = [2, 4, 6, 8, 10];
 export function CreateRoom() {
   const router = useRouter();
   const [nickname, setNickname] = useState("");
+  const [mode, setMode] = useState<"mega" | "mini">("mega");
   const [teams, setTeams] = useState(10);
   const [friends, setFriends] = useState(0);
   const [speed, setSpeed] = useState<"normal" | "fast">("normal");
@@ -24,7 +25,7 @@ export function CreateRoom() {
     setBusy(true);
     setError(null);
     try {
-      const seat = await auctionApi.create({ nickname: nickname.trim() || "Host", teams, humans: 1 + friends, speed });
+      const seat = await auctionApi.create({ nickname: nickname.trim() || "Host", teams: mode === "mini" ? 10 : teams, humans: 1 + friends, speed, mode });
       saveSeat(seat);
       router.push(`/auction/${seat.code}`);
     } catch (err) {
@@ -38,12 +39,23 @@ export function CreateRoom() {
       <Field label="Your name">
         <Input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={24} placeholder="Host" className="h-10" />
       </Field>
-      <Field label="Franchises" hint="Fewer teams, shorter auction: the pool scales with the room.">
-        <ToggleGroup type="single" value={String(teams)} variant="outline"
-          onValueChange={(v) => { if (!v) return; const n = Number(v); setTeams(n); setFriends((f) => Math.min(f, n - 1)); }}>
-          {TEAMS.map((n) => <ToggleGroupItem key={n} value={String(n)} className="w-12 font-mono">{n}</ToggleGroupItem>)}
+      <Field label="Auction" hint={mode === "mega"
+        ? "Every IPL player of the last three seasons, ₹120 cr each, empty squads."
+        : "The real IPL 2026 auction: the 10 franchises with their retained squads and real purses, the 77 players sold that day in the real sets. At the end, see what really happened."}>
+        <ToggleGroup type="single" value={mode} variant="outline"
+          onValueChange={(v) => { if (!v) return; setMode(v as "mega" | "mini"); if (v === "mini") setTeams(10); }}>
+          <ToggleGroupItem value="mega" className="px-4 font-mono text-xs uppercase">Mega auction</ToggleGroupItem>
+          <ToggleGroupItem value="mini" className="px-4 font-mono text-xs uppercase">IPL 2026 replay</ToggleGroupItem>
         </ToggleGroup>
       </Field>
+      {mode === "mega" && (
+        <Field label="Franchises" hint="Fewer teams, shorter auction: the pool scales with the room.">
+          <ToggleGroup type="single" value={String(teams)} variant="outline"
+            onValueChange={(v) => { if (!v) return; const n = Number(v); setTeams(n); setFriends((f) => Math.min(f, n - 1)); }}>
+            {TEAMS.map((n) => <ToggleGroupItem key={n} value={String(n)} className="w-12 font-mono">{n}</ToggleGroupItem>)}
+          </ToggleGroup>
+        </Field>
+      )}
       <Field label="Friends joining" hint={friends === 0 ? `Just you against ${teams - 1} bots.` : `${friends} friend${friends > 1 ? "s" : ""} join with the room code; ${teams - 1 - friends} bot${teams - 1 - friends === 1 ? "" : "s"} fill the rest.`}>
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="icon" onClick={() => setFriends((f) => Math.max(0, f - 1))} aria-label="Fewer friends">−</Button>

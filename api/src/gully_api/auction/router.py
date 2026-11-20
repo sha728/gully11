@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from ..db import connection, get_conn
 from .live import ROOMS, save_room
+from .mini import build_mini
 from .pool import RULES, build_pool
 from .room import AuctionError, Room, room_code
 
@@ -21,7 +22,7 @@ class NewRoom(BaseModel):
     teams: int = Field(default=10, ge=2, le=10)
     humans: int = Field(default=1, ge=1, le=10)
     speed: Literal["normal", "fast"] = "normal"
-    mode: Literal["mega"] = "mega"
+    mode: Literal["mega", "mini"] = "mega"
 
 
 class Join(BaseModel):
@@ -33,14 +34,17 @@ class Join(BaseModel):
 def create_room(req: NewRoom, conn=Depends(get_conn)) -> dict[str, Any]:
     """Host a room: you get the first franchise; the rest wait for friends (``humans``)
     or are bots."""
-    if req.humans > req.teams:
+    teams = 10 if req.mode == "mini" else req.teams       # mini: the real ten franchises
+    if req.humans > teams:
         raise HTTPException(422, "More people than franchises.")
-    pool = build_pool(conn, req.mode, req.teams)
+    replay = build_mini(conn) if req.mode == "mini" else None
+    pool = [] if replay else build_pool(conn, req.mode, teams)
     code = room_code()
     while ROOMS.get(code):
         code = room_code()
     try:
-        room = Room(code, req.mode, RULES[req.mode], pool, req.teams, req.humans, req.speed, host=req.nickname)
+        room = Room(code, req.mode, RULES[req.mode], pool, teams, req.humans, req.speed, host=req.nickname,
+                    replay=replay)
     except AuctionError as e:
         raise HTTPException(422, str(e)) from e
     ROOMS.add(room, save_room(connection))

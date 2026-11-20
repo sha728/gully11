@@ -34,34 +34,38 @@ CATEGORY_ORDER = ("BA", "AL", "WK", "FA", "SP")
 CATEGORY_LABEL = {"M": "Marquee", "BA": "Batters", "AL": "All-rounders", "WK": "Wicketkeepers",
                   "FA": "Fast bowlers", "SP": "Spinners"}
 
+# ``{before}``: only seasons before a cutoff (season labels sort in time order:
+# "2025" < "2025/26" < "2026"), so a replayed auction shows nothing from after it.
+_BEFORE = "(%(before)s::text IS NULL OR season < %(before)s::text)"
+
 _SQL = """
 WITH ipl AS (
     SELECT player_id, max(season) AS last_ipl, sum(matches) AS ipl_matches
     FROM player_season_stats
-    WHERE format = 'IPL' AND season = ANY(%(seasons)s)
+    WHERE format = 'IPL' AND season = ANY(%(seasons)s) AND {before}
     GROUP BY player_id
 ), form AS (
     SELECT player_id, sum(matches) AS m, sum(bat_innings) AS inn, sum(runs) AS runs,
            sum(balls_faced) AS bf, sum(balls_bowled) AS bb, sum(runs_conceded) AS rc,
            sum(wickets) AS w
     FROM player_season_stats
-    WHERE format = 'T20' AND left(season, 4)::int >= %(form_from)s
+    WHERE format = 'T20' AND left(season, 4)::int >= %(form_from)s AND {before}
     GROUP BY player_id
 ), career AS (
     SELECT player_id, sum(matches) AS m, sum(bat_innings) AS inn, sum(runs) AS runs,
            sum(balls_faced) AS bf, sum(balls_bowled) AS bb, sum(runs_conceded) AS rc,
            sum(wickets) AS w
-    FROM player_season_stats WHERE format = 'T20'
+    FROM player_season_stats WHERE format = 'T20' AND {before}
     GROUP BY player_id
 ), caps AS (
     SELECT player_id,
            sum(matches) FILTER (WHERE format = 'IPL') AS ipl_career,
            sum(matches) FILTER (WHERE format = 'T20I') AS t20i_career
-    FROM player_format_stats WHERE format IN ('IPL', 'T20I')
+    FROM player_season_stats WHERE format IN ('IPL', 'T20I') AND {before}
     GROUP BY player_id
 ), team AS (
     SELECT DISTINCT ON (player_id) player_id, team
-    FROM player_teams WHERE format = 'IPL'
+    FROM player_teams WHERE format = 'IPL' AND {before}
     ORDER BY player_id, season DESC, matches DESC
 )
 SELECT p.id, coalesce(p.full_name, p.name) AS name, p.name AS short_name, p.role, p.country,
@@ -70,13 +74,14 @@ SELECT p.id, coalesce(p.full_name, p.name) AS name, p.name AS short_name, p.role
        f.m, f.inn, f.runs, f.bf, f.bb, f.rc, f.w,
        coalesce(caps.ipl_career, 0) AS ipl_career, coalesce(caps.t20i_career, 0) AS t20i_career,
        c.m AS c_m, c.inn AS c_inn, c.runs AS c_runs, c.bf AS c_bf, c.bb AS c_bb, c.rc AS c_rc, c.w AS c_w
-FROM ipl
-JOIN players p ON p.id = ipl.player_id
+FROM players p
+LEFT JOIN ipl ON ipl.player_id = p.id
 LEFT JOIN form f ON f.player_id = p.id
 LEFT JOIN career c ON c.player_id = p.id
 LEFT JOIN caps ON caps.player_id = p.id
 LEFT JOIN team ON team.player_id = p.id
-"""
+WHERE ipl.player_id IS NOT NULL OR p.id = ANY(%(extra)s)
+""".replace("{before}", _BEFORE)
 
 REPUTATION_WEIGHT = 0.45  # IPL and T20I experience, next to form
 CAREER_WEIGHT = 0.35      # career T20 numbers count this much next to the last three seasons
@@ -180,8 +185,11 @@ def decay_for(teams: int, purse: int) -> float:
     """Steepness of the price curve so that the fair prices of the best
     ``teams * SQUAD_TARGET`` players add up to ``MARKET_SHARE`` of all purses: the
     room's money, not a fixed table, sets what a mid-ranked player is worth."""
-    n, budget = teams * SQUAD_TARGET, MARKET_SHARE * teams * purse
+    return _decay(teams * SQUAD_TARGET, MARKET_SHARE * teams * purse)
 
+
+def _decay(n: int, budget: float) -> float:
+    """Curve steepness at which the best ``n`` fair prices add up to ``budget``."""
     def total(tau: float) -> float:
         return sum(price_curve(i, tau) for i in range(n))
 
@@ -209,42 +217,51 @@ def pool_size(teams: int) -> int:
     return teams * RULES["mega"]["squad_max"] + 20
 
 
-def build_pool(conn, mode: str = "mega", teams: int = 10) -> list[dict]:
-    """Auction lots for a room of ``teams`` franchises, best first (sets and the
-    per-room shuffle come later)."""
-    rules = RULES[mode]
-    size = pool_size(teams)
-    tau = decay_for(teams, rules["purse_lakh"])
-    rows = conn.execute(_SQL, {"seasons": list(POOL_SEASONS), "form_from": FORM_FROM}).fetchall()
+def _rated(conn, extra: list[str] = (), before: str | None = None) -> list[dict]:
+    """Every player from the last three IPL seasons (plus ``extra`` ids), with
+    nationality fixes and a value, best first. Values are scored across this whole
+    population, so a player's rating doesn't depend on who else is in a room.
+    ``before``: count only seasons before this label (a replayed auction)."""
+    rows = conn.execute(_SQL, {"seasons": list(POOL_SEASONS), "form_from": FORM_FROM,
+                               "extra": list(extra), "before": before}).fetchall()
     fixes = _overrides()
     rows = [{**r, **({**fixes[r["id"]], "is_overseas_for_ipl": fixes[r["id"]]["country"] != "India"}
                      if r["id"] in fixes else {})} for r in rows]
     players = [{**r, "overseas": overseas(r), "value": v} for r, v in zip(rows, values(rows))]
     players.sort(key=lambda p: (-p["value"], p["id"]))
-    if size:
-        players = players[:size]
+    return players
+
+
+def _entry(p: dict, rank: int, fair: int, base: int) -> dict:
+    bowl_type = "SP" if p["bowling_style"] == "spin" else "FA"
+    cat = {"BAT": "BA", "AR": "AL", "WK": "WK", "BOWL": bowl_type}[p["role"]]
+    inn, bb = p["inn"] or 0, p["bb"] or 0
+    return {
+        "id": p["id"], "name": p["name"], "short_name": p["short_name"], "role": p["role"],
+        "country": p["country"], "overseas": p["overseas"], "capped": p["capped"],
+        "spinner": p["bowling_style"] == "spin" and p["role"] in ("BOWL", "AR"),
+        "last_team": p["last_team"], "last_ipl": p["last_ipl"], "ipl_matches": p["ipl_career"],
+        "category": cat, "fair": fair, "base": base, "rank": rank, "record": True,
+        "form": {
+            "matches": p["m"] or 0, "runs": p["runs"] or 0,
+            "bat_avg": round(p["runs"] / inn, 1) if inn else None,
+            "bat_sr": round(100 * p["runs"] / p["bf"], 1) if p["bf"] else None,
+            "wickets": p["w"] or 0,
+            "econ": round(6 * p["rc"] / bb, 2) if bb >= 60 else None,
+        },
+    }
+
+
+def build_pool(conn, mode: str = "mega", teams: int = 10) -> list[dict]:
+    """Mega-auction lots for a room of ``teams`` franchises, best first (sets and
+    the per-room shuffle come later)."""
+    rules = RULES[mode]
+    tau = decay_for(teams, rules["purse_lakh"])
     out = []
-    for rank, p in enumerate(players):
+    for rank, p in enumerate(_rated(conn)[: pool_size(teams)]):
         fair = max(_round_to_grid(price_curve(rank, tau), rules["increments"]), FLOOR_PRICE)
         base = base_price(fair, p["capped"], rules)
-        fair = max(fair, base)
-        bowl_type = "SP" if p["bowling_style"] == "spin" else "FA"
-        cat = {"BAT": "BA", "AR": "AL", "WK": "WK", "BOWL": bowl_type}[p["role"]]
-        inn, bb = p["inn"] or 0, p["bb"] or 0
-        out.append({
-            "id": p["id"], "name": p["name"], "short_name": p["short_name"], "role": p["role"],
-            "country": p["country"], "overseas": p["overseas"], "capped": p["capped"],
-            "spinner": p["bowling_style"] == "spin" and p["role"] in ("BOWL", "AR"),
-            "last_team": p["last_team"], "last_ipl": p["last_ipl"], "ipl_matches": p["ipl_career"],
-            "category": cat, "fair": fair, "base": base, "rank": rank,
-            "form": {
-                "matches": p["m"] or 0, "runs": p["runs"] or 0,
-                "bat_avg": round(p["runs"] / max(1, inn - 0), 1) if inn else None,
-                "bat_sr": round(100 * p["runs"] / p["bf"], 1) if p["bf"] else None,
-                "wickets": p["w"] or 0,
-                "econ": round(6 * p["rc"] / bb, 2) if bb >= 60 else None,
-            },
-        })
+        out.append(_entry(p, rank, max(fair, base), base))
     return out
 
 

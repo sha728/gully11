@@ -198,20 +198,21 @@ def test_summary_counts_each_unsold_player_once():
 
 
 def test_humans_choose_from_the_rooms_franchises():
+    from gully_api.auction.room import FRANCHISES
     r = room(teams=4, humans=2)
-    you = me(r)
-    bot_team = next(f.id for f in r.franchises.values() if f.bot)
-    old = you.id
-    r.choose(you, bot_team)                            # swap with a bot
-    assert you.id == bot_team and not r.franchises[bot_team].bot
-    assert r.franchises[old].bot and len(r.franchises) == 4
+    old = me(r)
+    bot_team = next(f for f in r.franchises.values() if f.bot)
+    bot_team.squad = [{"id": "p1", "price": 100, "retained": True}]
+    you = r.choose(old, bot_team.id)                   # take a bot's franchise
+    assert you is bot_team and you.token == r.host_token and not you.bot
+    assert you.squad == [{"id": "p1", "price": 100, "retained": True}]   # its squad comes with it
+    assert old.bot and old.token is None and old.squad == [] and len(r.franchises) == 4
     with pytest.raises(AuctionError, match="isn't in this room"):
-        r.choose(you, next(fid for fid, _ in __import__("gully_api.auction.room", fromlist=["FRANCHISES"]).FRANCHISES
-                           if fid not in r.franchises))
-    friend = r.claim("Asha", old)                       # join straight into a chosen team
-    assert friend.id == old
+        r.choose(you, next(fid for fid, _ in FRANCHISES if fid not in r.franchises))
+    friend = r.claim("Asha", old.id)                    # join straight into a chosen team
+    assert friend is old and friend.owner == "Asha" and not friend.bot
     with pytest.raises(AuctionError, match="already taken by Asha"):
-        r.choose(you, old)
+        r.choose(you, old.id)
     r.start(0, r.host_token)
     with pytest.raises(AuctionError, match="fixed"):
         r.choose(you, friend.id)
@@ -220,3 +221,48 @@ def test_humans_choose_from_the_rooms_franchises():
 def test_view_does_not_reveal_bot_personalities():
     r = room(teams=4, humans=1)
     assert "personality" not in str(r.view()) and "aggressive" not in str(r.view())
+
+
+def replay_setup():
+    """A tiny mini-mode setup: two lots, retained squads, real outcomes."""
+    from gully_api.auction.room import FRANCHISES
+    lots = pool(4)
+    lots[0].update(id="os", overseas=True, base=200, fair=1500)
+    lots[1].update(id="dom", overseas=False, base=75, fair=300)
+    retained = {f"r{i}": {**lots[2], "id": f"r{i}", "overseas": False} for i in range(10)}
+    return {
+        "lots": [("BA1", lots[0]), ("ACC", lots[1])],
+        "real": {"os": {"team": "KKR", "price": 2520}, "dom": {"team": "CSK", "price": 75}},
+        "purse": {fid: 5000 for fid, _ in FRANCHISES},
+        "squads": {fid: [{"id": f"r{i}", "price": 100, "retained": True}] for i, (fid, _) in enumerate(FRANCHISES)},
+        "players": retained,
+    }
+
+
+def test_replay_starts_from_real_squads_and_caps_overseas_fees():
+    rules = {**R, "overseas_fee_cap": 1800}
+    r = Room("MINIXX", "mini", rules, [], teams=2, humans=2, seed=1, replay=replay_setup())
+    assert len(r.franchises) == 10                      # always the real ten
+    you = me(r)
+    assert you.squad[0]["retained"] and you.start_purse == 5000
+    for f in r.franchises.values():
+        f.bot = f is not you and f.owner is None and f.bot
+    r.start(0, r.host_token)
+    assert r.lot.player == "os" and r.lot.set_code == "BA1"
+    r.lot.price, r.lot.leader = 2500, None               # bidding has gone past the cap
+    r.bid(you.id, r.next_amount(), 1)
+    r.tick(1 + R["timers"]["normal"]["bid"])
+    bought = you.squad[-1]
+    assert bought["price"] == 2525 and bought["paid"] == 1800 and you.purse == 5000 - 1800
+    assert r.lot.player == "dom" and r.accelerated     # the real accelerated round
+
+
+def test_reality_only_in_the_summary():
+    r = Room("MINIXX", "mini", R, [], teams=2, humans=1, seed=1, replay=replay_setup())
+    r.start(0, r.host_token)
+    assert "2520" not in str(r.view()) and "real" not in str(r.view()["lot"])
+    while r.phase == "live":
+        r.pass_(me(r).id) if me(r).id not in r.lot.passed else None
+        r.tick(r.lot.ends_at + 1 if r.lot else 0)
+    real = {x["player"]: x for x in r.summary()["reality"]}
+    assert real["os"]["real_team"] == "KKR" and real["os"]["real_price"] == 2520

@@ -132,6 +132,7 @@ class Rooms:
 
     async def _handle(self, live: LiveRoom, ws: WebSocket, franchise, token, msg: dict) -> None:
         kind = msg.get("type")
+        franchise = live.room.by_token(token)        # fresh: picking a team moves the seat
         try:
             if kind == "start":
                 await self.start(live, token)
@@ -143,7 +144,8 @@ class Rooms:
                 await live.act(lambda: live.room.pass_(franchise.id))
             elif kind == "choose":
                 await live.act(lambda: live.room.choose(franchise, str(msg["franchise"])))
-                # Same seat, new team: re-point this socket and tell the browser.
+                # Now running another franchise: re-point this socket and tell the browser.
+                franchise = live.room.by_token(token)
                 live.sockets[ws] = franchise.id
                 live.refresh_online()
                 await ws.send_text(json.dumps({"type": "you", "you": franchise.id}))

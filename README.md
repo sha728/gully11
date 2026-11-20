@@ -32,6 +32,7 @@ uv run gully-pipeline spotcheck                  # recount 10 players from raw J
 uv run gully-pipeline legends                    # rebuild reference/legends.csv (needs WIKIMEDIA_CONTACT)
 uv run gully-pipeline names                      # full names from Wikidata -> reference/ (needs WIKIMEDIA_CONTACT)
 uv run gully-pipeline simbase                    # simulator base rates -> api/src/gully_api/sim/data/
+uv run gully-pipeline auction2026                 # IPL 2026 auction + retentions from Wikipedia (needs WIKIMEDIA_CONTACT)
 uv run pytest
 
 # API

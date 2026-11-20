@@ -35,8 +35,21 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("legends", help="Rebuild reference/legends.csv from Wikipedia infoboxes")
     sub.add_parser("simbase", help="Write the simulator's base_rates.json from parsed data")
     sub.add_parser("names", help="Fetch full names + Wikipedia titles from Wikidata")
+    sub.add_parser("auction2026", help="IPL 2026 auction + retentions from Wikipedia (mini mode)")
 
     args = p.parse_args(argv)
+
+    if args.cmd == "auction2026":
+        from collections import Counter
+        from .auction_wiki import AUCTION_CSV, RETAINED_CSV, build
+        res = build()
+        print(f"{len(res['retained'])} retained -> {RETAINED_CSV}")
+        print(f"{len(res['sold'])} sold -> {AUCTION_CSV} (revision {res['revid']})")
+        print("  per team retained:", dict(Counter(r["team"] for r in res["retained"])))
+        print("  per team bought:", dict(Counter(r["team"] for r in res["sold"])))
+        if res["missing"]:
+            print(f"  not matched to a player id ({len(res['missing'])}): {res['missing']}")
+        return
 
     if args.cmd == "names":
         from .wikidata import NAMES_CSV, fetch_names

@@ -22,6 +22,7 @@ export interface PoolPlayer {
   fair: number;
   base: number;
   rank: number;
+  record?: boolean;          // false: no ball-by-ball record (stats empty)
   form: { matches: number; runs: number; bat_avg: number | null; bat_sr: number | null; wickets: number; econ: number | null };
 }
 
@@ -31,11 +32,14 @@ export interface FranchiseView {
   bot: boolean;
   owner: string | null;
   purse: number;
-  squad: { id: string; price: number }[];
+  start_purse: number;
+  squad: SquadEntry[];
   size: number;
   overseas: number;
   roles: Record<Role, number>;
 }
+
+export interface SquadEntry { id: string; price: number; retained?: boolean; paid?: number }
 
 export interface LogEntry {
   player: string;
@@ -52,7 +56,8 @@ export interface RoomState {
   type: "state";
   server_now: number;
   code: string;
-  mode: string;
+  mode: "mega" | "mini";
+  mode_name: string;
   phase: "lobby" | "live" | "ended";
   speed: "normal" | "fast";
   version: number;
@@ -61,7 +66,8 @@ export interface RoomState {
   total: number;
   round: { n: number; of: number };
   result?: Summary;
-  rules: { purse_lakh: number; squad_min: number; squad_max: number; overseas_max: number; increments: [number | null, number][] };
+  rules: { purse_lakh: number; squad_min: number; squad_max: number; overseas_max: number;
+    increments: [number | null, number][]; overseas_fee_cap: number | null };
   franchises: FranchiseView[];
   lot: null | {
     player: PoolPlayer;
@@ -83,10 +89,11 @@ export interface RoomState {
 
 export interface Summary {
   franchises: { id: string; name: string; bot: boolean; owner: string | null; spent: number; purse: number;
-    squad: { id: string; price: number; player: PoolPlayer }[] }[];
+    squad: (SquadEntry & { player: PoolPlayer })[] }[];
   sold: number;
   unsold: number;
   best_value: LogEntry[];
+  reality?: { player: string; name: string; real_team: string; real_price: number; team: string | null; price: number | null }[];
 }
 
 /** 30 → "₹30 L", 250 → "₹2.5 cr" (money is held in lakh). */
@@ -110,7 +117,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Seat { code: string; token: string; franchise: string }
 
 export const auctionApi = {
-  create: (b: { nickname: string; teams: number; humans: number; speed: "normal" | "fast" }) =>
+  create: (b: { nickname: string; teams: number; humans: number; speed: "normal" | "fast"; mode: "mega" | "mini" }) =>
     call<Seat>("/rooms", { method: "POST", body: JSON.stringify(b) }),
   join: (code: string, nickname: string, franchise?: string) =>
     call<Seat>(`/rooms/${encodeURIComponent(code)}/join`, { method: "POST", body: JSON.stringify({ nickname, franchise }) }),

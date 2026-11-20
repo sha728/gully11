@@ -4,7 +4,15 @@
 # Runs pg_dump/psql inside the local Postgres container, so nothing else needs
 # installing. The app's own tables (drafts, challenges, auctions, seasons) are
 # copied empty: the dev site starts without your local test games.
-param([Parameter(Mandatory = $true)][string]$Target)
+param([string]$Target)
+
+# No -Target: ask for it (input hidden, never echoed), so nothing secret is typed on
+# the command line or kept in the shell history.
+if (-not $Target) {
+    $secure = Read-Host "Paste the Neon connection string (Ctrl+V), then press Enter" -AsSecureString
+    $Target = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+}
+if ($Target -notmatch "^postgres(ql)?://") { throw "That doesn't look like a connection string (it should start with postgresql://)." }
 
 $container = "gully11-postgres-1"
 $userData = @("xi_drafts", "xi_challenges", "sim_results", "auction_rooms", "seasons")

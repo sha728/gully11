@@ -254,6 +254,19 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
   const fresh = youName ? [...season.matches].reverse().find((m) => m.teams.includes(youName)) : undefined;
   const unwatched = fresh && !seen.includes(fresh.match) && fresh.match === played ? fresh : undefined;
 
+  // The XI panel opens by itself when your match is up next, or when you arrive
+  // from "Change your XI" (…/season?xi=1).
+  const openXi = () => {
+    setEditing(true);
+    requestAnimationFrame(() => document.getElementById("your-xi")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("xi")) openXi();
+    else if (nextIsMine) setEditing(true);
+  }, [nextIsMine]);
+  const xiNames = mineTeam ? mineTeam.xi.map((id) => mineTeam.players.find((p) => p.id === id)?.name ?? "") : [];
+  const subName = mineTeam?.impact ? mineTeam.players.find((p) => p.id === mineTeam.impact)?.name : null;
+
   async function step(how: "next" | "mine" | "end", thenWatch = false) {
     setBusy(true);
     setError(null);
@@ -299,6 +312,9 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
             <div className="label">Next · match {next.match}{next.stage !== "League" ? ` · ${next.stage}` : ""}</div>
             <div className="font-display text-2xl font-bold uppercase">{next.home} <span className="text-muted-foreground">v</span> {next.away}</div>
           </div>
+          {nextIsMine && mineTeam && token && (
+            <Button variant="outline" size="lg" onClick={openXi} className="font-mono uppercase">Change XI</Button>
+          )}
           {view.host ? (
             <>
               {nextIsMine ? (
@@ -319,10 +335,20 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
       )}
 
       {mineTeam && !season.champion && token && (
-        <section className="border">
-          <button type="button" onClick={() => setEditing((e) => !e)} className="flex w-full items-center justify-between px-4 py-3 text-left">
-            <span><span className="label">Your XI</span><span className="ml-3 text-sm text-muted-foreground">change it before {nextIsMine ? "this match" : "your next match"}</span></span>
-            <CaretDownIcon className={cn("transition-transform", editing && "rotate-180")} />
+        <section id="your-xi" className={cn("scroll-mt-20 border", nextIsMine && "border-signal/60")}>
+          <button type="button" onClick={() => setEditing((e) => !e)} aria-expanded={editing}
+            className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left hover:bg-muted/40">
+            <span className="min-w-0">
+              <span className="label">Your XI · {mineTeam.name}</span>
+              <span className="mt-1 block text-sm">
+                {xiNames.map((n, i) => <span key={i}>{i > 0 && <span className="text-muted-foreground"> · </span>}<span className="font-mono text-[10px] text-muted-foreground">{i + 1}</span> {n}</span>)}
+                {subName && <span className="text-muted-foreground"> · sub {subName}</span>}
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-signal uppercase">
+              {editing ? "Close" : nextIsMine ? "Change for this match" : "Change XI"}
+              <CaretDownIcon className={cn("transition-transform", editing && "rotate-180")} />
+            </span>
           </button>
           {editing && <div className="border-t p-4"><XiEditor key={xiKey(mineTeam)} code={code} team={mineTeam} token={token} onSaved={saved} justSaved={justSaved} /></div>}
         </section>

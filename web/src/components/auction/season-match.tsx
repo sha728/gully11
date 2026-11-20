@@ -49,9 +49,16 @@ export function SeasonMatch({ code, n, live }: { code: string; n: number; live: 
         after={
           <div className="flex flex-wrap items-center gap-4 border-l-2 border-signal pl-4">
             <SeenMarker code={code} n={n} />
-            <Button asChild size="lg" className="ml-auto font-mono uppercase">
-              <Link href={back}>Back to the season<ArrowRightIcon /></Link>
-            </Button>
+            <div className="ml-auto flex flex-wrap gap-2">
+              {youName && match.teams.includes(youName) && !season.champion && (
+                <Button asChild variant="outline" size="lg" className="font-mono uppercase">
+                  <Link href={`${back}?xi=1#your-xi`}>Change your XI</Link>
+                </Button>
+              )}
+              <Button asChild size="lg" className="font-mono uppercase">
+                <Link href={back}>Back to the season<ArrowRightIcon /></Link>
+              </Button>
+            </div>
           </div>
         } />
     </div>

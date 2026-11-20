@@ -387,7 +387,7 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
         </section>
       </div>
 
-      {season.champion && <Caps season={season} idOf={idOf} />}
+      {played > 0 && <Caps season={season} idOf={idOf} youName={youName} />}
       {!season.champion && <EveryXi teams={view.teams} you={you} />}
     </div>
   );
@@ -410,14 +410,23 @@ function ResultRow({ code, m, idOf, youName }: { code: string; m: MatchSummary; 
   );
 }
 
-function Caps({ season, idOf }: { season: Season; idOf: Record<string, string> }) {
-  const list = (title: string, rows: Season["caps"]["orange"], stat: (r: Season["caps"]["orange"][number]) => string) => (
+/** Orange and Purple Caps: the race while the season runs (top five so far),
+ * the winners once it's over. Your players are marked. */
+function Caps({ season, idOf, youName }: { season: Season; idOf: Record<string, string>; youName: string | null }) {
+  const over = !!season.champion;
+  const list = (title: string, color: string, rows: Season["caps"]["orange"], stat: (r: Season["caps"]["orange"][number]) => string) => (
     <section className="space-y-2">
-      <div className="label"><CrownIcon weight="fill" className="mr-1 inline" />{title}</div>
+      <div className="label"><CrownIcon weight="fill" className="mr-1 inline" style={{ color }} />{title}{over ? "" : " · so far"}</div>
       <ol className="divide-y border-y text-sm">
+        {rows.length === 0 && <li className="py-2 text-muted-foreground">Nobody yet.</li>}
         {rows.map((r, i) => (
-          <li key={r.id} className="flex justify-between gap-2 py-1.5">
-            <span className="truncate"><span className="mr-2 font-mono text-muted-foreground">{i + 1}</span>{r.name} <span className="font-mono text-[10px] text-muted-foreground">{idOf[r.team] ?? r.team}</span></span>
+          <li key={r.id} className={cn("flex justify-between gap-2 py-1.5", r.team === youName && "bg-signal/5")}>
+            <span className="truncate">
+              <span className="mr-2 font-mono text-muted-foreground">{i + 1}</span>
+              {i === 0 && <CrownIcon weight="fill" className="mr-1 inline" style={{ color }} aria-label="holds the cap" />}
+              {r.name} <span className="font-mono text-[10px] text-muted-foreground">{idOf[r.team] ?? r.team}</span>
+              {r.team === youName && <span className="ml-1 font-mono text-[10px] text-signal">YOURS</span>}
+            </span>
             <span className="font-mono font-semibold tnum">{stat(r)}</span>
           </li>
         ))}
@@ -426,8 +435,8 @@ function Caps({ season, idOf }: { season: Season; idOf: Record<string, string> }
   );
   return (
     <div className="grid gap-10 md:grid-cols-2">
-      {list("Orange Cap · most runs", season.caps.orange, (r) => `${r.runs} (${r.balls})`)}
-      {list("Purple Cap · most wickets", season.caps.purple, (r) => `${r.wickets} wkts`)}
+      {list("Orange Cap · most runs", "oklch(0.75 0.17 60)", season.caps.orange, (r) => `${r.runs} (${r.balls})`)}
+      {list("Purple Cap · most wickets", "oklch(0.6 0.2 300)", season.caps.purple, (r) => `${r.wickets} wkts`)}
     </div>
   );
 }

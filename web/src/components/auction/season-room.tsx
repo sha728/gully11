@@ -49,6 +49,8 @@ export function SeasonRoom({ code }: { code: string }) {
 
 function Setup({ code, view, token, setView }: { code: string; view: SeasonView; token: string | null; setView: (v: SeasonView) => void }) {
   const teams = view.teams;
+  const [justSaved, setJustSaved] = useState(false);
+  const saved = () => { setJustSaved(true); seasonApi.get(code, token).then(setView).catch(() => {}); };
   const mine = teams.find((t) => t.id === view.you);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +79,7 @@ function Setup({ code, view, token, setView }: { code: string; view: SeasonView;
       </div>
 
       <div className="grid gap-10 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        {mine ? <XiEditor code={code} team={mine} token={token!} /> : (
+        {mine ? <XiEditor key={xiKey(mine)} code={code} team={mine} token={token!} onSaved={saved} justSaved={justSaved} /> : (
           <p className="text-sm text-muted-foreground">You didn&apos;t run a franchise in this auction: every XI is picked by the engine.</p>
         )}
         <section className="space-y-4">
@@ -99,6 +101,8 @@ function Setup({ code, view, token, setView }: { code: string; view: SeasonView;
     </div>
   );
 }
+
+const xiKey = (t: SetupTeam) => `${t.xi.join(",")}|${t.impact ?? ""}`;
 
 function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
   return (
@@ -122,11 +126,16 @@ function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
   );
 }
 
-function XiEditor({ code, team, token }: { code: string; team: SetupTeam; token: string }) {
+/** Your XI. Starts from the saved one (``team.xi``); after a save the page reloads
+ * the season, and a new saved XI re-opens the editor from it (see the ``key`` where
+ * it's used), so what you see is always what the next match will use. */
+function XiEditor({ code, team, token, onSaved, justSaved = false }: {
+  code: string; team: SetupTeam; token: string; onSaved: () => void; justSaved?: boolean;
+}) {
   const byId = useMemo(() => Object.fromEntries(team.players.map((p) => [p.id, p])), [team.players]);
   const [xi, setXi] = useState<string[]>(team.xi);
   const [impact, setImpact] = useState<string | null>(team.impact);
-  const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; msg?: string }>({ kind: "idle" });
+  const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; msg?: string }>({ kind: justSaved ? "saved" : "idle" });
   const bench = team.players.filter((p) => !xi.includes(p.id));
   const os = xi.filter((id) => byId[id]?.overseas).length;
   const bowling = xi.filter((id) => ["BOWL", "AR"].includes(byId[id]?.role)).length + (impact && ["BOWL", "AR"].includes(byId[impact]?.role) ? 1 : 0);
@@ -143,6 +152,7 @@ function XiEditor({ code, team, token }: { code: string; team: SetupTeam; token:
     try {
       await seasonApi.lineup(code, token, xi, impact);
       setState({ kind: "saved" });
+      onSaved();
     } catch (e) {
       setState({ kind: "error", msg: e instanceof Error ? e.message : "Couldn't save." });
     }
@@ -223,6 +233,8 @@ function PlayerName({ p }: { p: SeasonPlayer }) {
 function SeasonBoard({ code, view, token, setView }: { code: string; view: SeasonView; token: string | null; setView: (v: SeasonView) => void }) {
   const router = useRouter();
   const season = view.season as Season;
+  const [justSaved, setJustSaved] = useState(false);
+  const saved = () => { setJustSaved(true); seasonApi.get(code, token).then(setView).catch(() => {}); };
   const you = view.you;
   const total = view.total ?? season.matches.length;
   const played = season.matches.length;
@@ -312,7 +324,7 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
             <span><span className="label">Your XI</span><span className="ml-3 text-sm text-muted-foreground">change it before {nextIsMine ? "this match" : "your next match"}</span></span>
             <CaretDownIcon className={cn("transition-transform", editing && "rotate-180")} />
           </button>
-          {editing && <div className="border-t p-4"><XiEditor code={code} team={mineTeam} token={token} /></div>}
+          {editing && <div className="border-t p-4"><XiEditor key={xiKey(mineTeam)} code={code} team={mineTeam} token={token} onSaved={saved} justSaved={justSaved} /></div>}
         </section>
       )}
 

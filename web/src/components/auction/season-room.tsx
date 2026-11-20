@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowDownIcon, ArrowUpIcon, CaretDownIcon, CrownIcon, FastForwardIcon, PlayIcon, PlusIcon, SkipForwardIcon, TrophyIcon, XIcon,
+  ArrowDownIcon, ArrowUpIcon, CaretDownIcon, CrownIcon, FastForwardIcon, GavelIcon, PlayIcon, PlusIcon, SkipForwardIcon, TrophyIcon, XIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -70,7 +70,8 @@ function Setup({ code, view, token, setView }: { code: string; view: SeasonView;
   return (
     <div className="space-y-10">
       <div>
-        <div className="label mb-2">Room {code} · season · {teams.length === 10 ? "IPL format: 14 matches each, then the playoffs" : "double round robin, then the playoffs"}</div>
+        <Link href={`/auction/${code}`} className="label hover:text-foreground">← Auction room {code}</Link>
+        <div className="label mt-4 mb-2">Season · {teams.length === 10 ? "IPL format: 14 matches each, then the playoffs" : "double round robin, then the playoffs"}</div>
         <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">Pick your <span className="text-signal">XI</span></h1>
         <div className="seam mt-5" aria-hidden />
         <p className="mt-4 max-w-2xl text-muted-foreground">
@@ -253,7 +254,7 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
   const mineTeam = view.teams.find((t) => t.id === you);
   // Your most recent match, if it's the latest result and you haven't watched it.
   const fresh = youName ? [...season.matches].reverse().find((m) => m.teams.includes(youName)) : undefined;
-  const unwatched = fresh && !seen.includes(fresh.match) && fresh.match === played ? fresh : undefined;
+  const unwatched = fresh && !season.champion && !seen.includes(fresh.match) && fresh.match === played ? fresh : undefined;
 
   // The XI panel opens when you ask: "Change XI", or arriving from "Change your
   // XI" at the end of a match (…/season?xi=1).
@@ -284,7 +285,8 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
   return (
     <div className="space-y-10">
       <div>
-        <div className="label mb-2">Room {code} · {season.format} · {played} of {total} played</div>
+        <Link href={`/auction/${code}`} className="label hover:text-foreground">← Auction room {code}</Link>
+        <div className="label mt-4 mb-2">{season.format} · {played} of {total} played</div>
         {season.champion ? (
           <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">
             <TrophyIcon weight="fill" className="mr-2 inline text-signal" />
@@ -296,6 +298,22 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
         <div className="seam mt-5" aria-hidden />
         {season.champion && season.runner_up && (
           <p className="mt-4 text-muted-foreground">They beat {season.runner_up.name} in the final.{season.champion.id === you ? " That's your franchise." : ""}</p>
+        )}
+        {season.champion && (
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Button asChild size="lg" className="font-mono uppercase">
+              <Link href={`/auction/${code}/season/match/${played}`}><PlayIcon weight="fill" />Watch the final</Link>
+            </Button>
+            <Button asChild variant="outline" size="lg" className="font-mono uppercase">
+              <Link href={`/auction/${code}`}>Auction summary</Link>
+            </Button>
+            <Button asChild variant="outline" size="lg" className="font-mono uppercase">
+              <Link href="/auction"><GavelIcon />New auction</Link>
+            </Button>
+            <Button asChild variant="ghost" size="lg" className="font-mono uppercase">
+              <Link href="/xi">XI Builder</Link>
+            </Button>
+          </div>
         )}
       </div>
 

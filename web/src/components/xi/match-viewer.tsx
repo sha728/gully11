@@ -35,9 +35,42 @@ function isBoundary(e: BallEvent) {
 export function MatchDay({ challenge, match, n, live, vs, summary }: {
   challenge: Challenge; match: FullMatch; n: number; live: boolean; vs?: string; summary: React.ReactNode;
 }) {
-  const isTest = challenge.format === "Test";
-  const balls = match.commentary;
   const who = useWho(challenge.opponent);
+  const before = challenge.matches.slice(0, n - 1);
+  const sofar = (upto: typeof before) => {
+    const w = upto.filter((m) => m.winner === YOU).length;
+    const l = upto.filter((m) => m.result === "win" && m.winner !== YOU).length;
+    return `${w}–${l}`;
+  };
+  const q = (extra: string) => `?${[live ? "live=1" : "", vs ? `vs=${vs}` : "", extra].filter(Boolean).join("&")}`;
+  const nextHref = n < 5 ? `/xi/c/${challenge.slug}/match/${n + 1}${q("")}` : `/xi/c/${challenge.slug}${vs ? `?vs=${vs}` : ""}`;
+  return (
+    <MatchStage match={match} format={challenge.format} live={live} who={who} you={YOU} summary={summary}
+      kicker={<>Match {n} of 5 · v {challenge.opponent}{live && <> · series {sofar(before)}</>}</>}
+      after={
+        <div className="flex flex-wrap items-center gap-4 border-l-2 border-signal pl-4">
+          <div>
+            <div className="label">Series after match {n}</div>
+            <div className="font-display text-3xl font-black tnum">{sofar(challenge.matches.slice(0, n))}</div>
+          </div>
+          <Button asChild size="lg" className="ml-auto font-mono uppercase">
+            <Link href={nextHref}>{n < 5 ? <>Match {n + 1}<ArrowRightIcon /></> : <>The series verdict<ArrowRightIcon /></>}</Link>
+          </Button>
+        </div>
+      } />
+  );
+}
+
+/** One match: heading, live replay, scorecard and worm. ``who`` turns a team name
+ * into its label ("You", "Greats", "RCB"); ``you`` is the viewer's team, if any.
+ * ``live`` hides the result (heading, cards, ``summary``) until the last ball;
+ * ``after`` shows once it's revealed in a live match (what comes next). */
+export function MatchStage({ match, format, live, who, you, kicker, summary, after }: {
+  match: FullMatch; format: string; live: boolean; who: (team: string) => string; you: string | null;
+  kicker: React.ReactNode; summary?: React.ReactNode; after?: React.ReactNode;
+}) {
+  const isTest = format === "Test";
+  const balls = match.commentary;
   const [cursor, setCursor] = useState(live ? 0 : balls.length);
   const [playing, setPlaying] = useState(live);
   const [speed, setSpeed] = useState(isTest ? 3 : 1);
@@ -50,47 +83,29 @@ export function MatchDay({ challenge, match, n, live, vs, summary }: {
     return () => clearTimeout(t);
   }, [playing, cursor, speed, balls.length]);
 
-  const youWon = match.winner === YOU;
+  const youWon = !!you && match.winner === you;
   const headline = match.result === "draw" ? "Match drawn" : match.result === "tie" ? "Match tied"
     : `${who(match.winner ?? "")} ${match.margin}`;
-  const before = challenge.matches.slice(0, n - 1);
-  const sofar = (upto: typeof before) => {
-    const w = upto.filter((m) => m.winner === YOU).length;
-    const l = upto.filter((m) => m.result === "win" && m.winner !== YOU).length;
-    return `${w}–${l}`;
-  };
-  const q = (extra: string) => `?${[live ? "live=1" : "", vs ? `vs=${vs}` : "", extra].filter(Boolean).join("&")}`;
-  const nextHref = n < 5 ? `/xi/c/${challenge.slug}/match/${n + 1}${q("")}` : `/xi/c/${challenge.slug}${vs ? `?vs=${vs}` : ""}`;
+  const [a, b] = match.teams;
+  const mine = you && (a === you || b === you);
+  const other = mine ? (a === you ? b : a) : b;
 
   return (
     <div className="space-y-8">
       <div>
-        <div className="label mt-4 mb-2">
-          Match {n} of 5 · v {challenge.opponent}
-          {live && <> · series {sofar(before)}</>}
-        </div>
+        <div className="label mt-4 mb-2">{kicker}</div>
         {revealed ? (
           <h1 className={cn("font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl", youWon && "text-signal")}>{headline}</h1>
         ) : (
           <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">
-            You <span className="text-muted-foreground">v</span> {who("")}
+            {who(mine ? you : a)} <span className="text-muted-foreground">v</span> {who(other)}
             <span className="ml-3 inline-block translate-y-[-0.35em] bg-signal px-2 py-0.5 align-middle font-mono text-xs tracking-widest text-signal-foreground">LIVE</span>
           </h1>
         )}
         <div className="seam mt-5" aria-hidden />
       </div>
 
-      {revealed && live && (
-        <div className="flex flex-wrap items-center gap-4 border-l-2 border-signal pl-4">
-          <div>
-            <div className="label">Series after match {n}</div>
-            <div className="font-display text-3xl font-black tnum">{sofar(challenge.matches.slice(0, n))}</div>
-          </div>
-          <Button asChild size="lg" className="ml-auto font-mono uppercase">
-            <Link href={nextHref}>{n < 5 ? <>Match {n + 1}<ArrowRightIcon /></> : <>The series verdict<ArrowRightIcon /></>}</Link>
-          </Button>
-        </div>
-      )}
+      {revealed && live && after}
 
       {revealed && summary}
 
@@ -101,7 +116,7 @@ export function MatchDay({ challenge, match, n, live, vs, summary }: {
           {revealed && !isTest && <TabsTrigger value="worm" className="font-mono text-xs uppercase">Worm</TabsTrigger>}
         </TabsList>
         <TabsContent value="replay">
-          <Replay match={match} isTest={isTest} ballsPerInnings={BALLS[challenge.format]} who={who} live={live}
+          <Replay match={match} isTest={isTest} ballsPerInnings={BALLS[format] ?? 120} who={who} live={live}
             cursor={cursor} setCursor={setCursor} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} />
         </TabsContent>
         {revealed && (
@@ -148,12 +163,13 @@ function Replay({ match, isTest, ballsPerInnings, who, live, cursor, setCursor, 
 
   const winProb = !isTest && match.win_prob.length && cursor > 0 ? match.win_prob[cursor - 1]?.[1] : null;
   const firstBatting = match.innings[0]?.batting;
+  const secondBatting = match.teams.find((t) => t !== firstBatting) ?? "";
 
   const jump = (to: number) => { setPlaying(false); setCursor(to); };
 
   return (
     <div className="space-y-5">
-      <Board state={state} who={who} isTest={isTest} winProb={winProb ?? null} firstBatting={firstBatting} />
+      <Board state={state} who={who} isTest={isTest} winProb={winProb ?? null} firstBatting={firstBatting} secondBatting={secondBatting} />
 
       <div className="flex flex-wrap items-center gap-2">
         {done && !playing ? (
@@ -219,10 +235,9 @@ function Replay({ match, isTest, ballsPerInnings, who, live, cursor, setCursor, 
   );
 }
 
-function Board({ state: s, who, isTest, winProb, firstBatting }: {
-  state: LiveState; who: (t: string) => string; isTest: boolean; winProb: number | null; firstBatting?: string;
+function Board({ state: s, who, isTest, winProb, firstBatting, secondBatting }: {
+  state: LiveState; who: (t: string) => string; isTest: boolean; winProb: number | null; firstBatting?: string; secondBatting: string;
 }) {
-  const youFirst = firstBatting === YOU;
   return (
     <div className="bg-[oklch(0.17_0.01_150)] text-[oklch(0.93_0.012_85)]">
       <div className="grid gap-px bg-white/10 md:grid-cols-[1.1fr_1.4fr_1fr]">
@@ -279,7 +294,7 @@ function Board({ state: s, who, isTest, winProb, firstBatting }: {
         <div className="px-5 pt-3 pb-4">
           <div className="mb-1.5 flex justify-between font-mono text-[11px] uppercase">
             <span>{who(firstBatting ?? "")} {Math.round(winProb * 100)}%</span>
-            <span>{Math.round((1 - winProb) * 100)}% {youFirst ? who("") : "You"}</span>
+            <span>{Math.round((1 - winProb) * 100)}% {who(secondBatting)}</span>
           </div>
           <div className="flex h-1.5 w-full bg-white/15">
             <div className="h-full bg-[oklch(0.67_0.19_27)] transition-[width] duration-300" style={{ width: `${winProb * 100}%` }} />

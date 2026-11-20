@@ -1,6 +1,6 @@
 "use client";
 
-import { CrownIcon, GavelIcon, HandPalmIcon, RobotIcon, UserIcon, WifiSlashIcon } from "@phosphor-icons/react";
+import { CrownIcon, GavelIcon, HandPalmIcon, RobotIcon, TrophyIcon, UserIcon, WifiSlashIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -422,7 +422,10 @@ function Ended({ code, summary, you, min = 18 }: { code: string; summary: Summar
         {mine && mine.squad.length < min && (
           <p className="mt-2 text-sm text-destructive">That&apos;s short of the {min}-player minimum: the players ran out before your squad was legal.</p>
         )}
-        <p className="mt-2 font-mono text-xs text-muted-foreground">Next milestone: every squad plays a simulated season on the match engine.</p>
+        <Button asChild size="lg" className="mt-5 h-12 font-mono uppercase">
+          <Link href={`/auction/${code}/season`}><TrophyIcon weight="fill" />Play the season</Link>
+        </Button>
+        <p className="mt-2 font-mono text-[11px] text-muted-foreground">Every squad plays an IPL season on the match engine: set your XI, then watch your matches ball by ball.</p>
       </div>
 
       {summary.reality && <Reality rows={summary.reality} you={you} />}

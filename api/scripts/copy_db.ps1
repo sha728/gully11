@@ -17,7 +17,9 @@ if (-not $Target) {
     $secure = Read-Host "Paste the Neon connection string (Ctrl+V), then press Enter" -AsSecureString
     $Target = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
 }
-if ($Target -notmatch "^postgres(ql)?://") { throw "That doesn't look like a connection string (it should start with postgresql://)." }
+# Accept what consoles copy around the address too (psql '...', quotes, spaces).
+if ($Target -match "postgres(ql)?://[^\s'`"]+") { $Target = $Matches[0] }
+else { throw "That isn't a connection string: got $($Target.Length) characters with no postgresql:// in them. Copy it again and retry." }
 
 $container = "gully11-postgres-1"
 # Tables the pipeline loads (api/db/schema/players.sql); everything else belongs to the app.

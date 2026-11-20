@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fmt, ROLE_LABEL } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { captainText, isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView, type LineupSlot, type XIFormat } from "@/lib/xi";
+import { captainText, isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView, type LineupSlot, type XIFormat, rememberDaily } from "@/lib/xi";
 
 const MAX_OVERSEAS = 4;
 const ROLL_MS = 1100;
@@ -120,6 +120,7 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
     setError(null);
     try {
       const res = await xiApi.play(d.id);
+      if (d.daily) rememberDaily(format, d.daily, d.id);
       // Straight into match day: the series plays out live, one match at a time.
       router.push(`/xi/c/${res.slug}/match/1?live=1${res.rival ? `&vs=${res.rival}` : ""}`);
     } catch (e) {

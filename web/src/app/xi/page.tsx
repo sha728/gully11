@@ -1,4 +1,4 @@
-import { CalendarDotIcon, ShuffleIcon } from "@phosphor-icons/react/ssr";
+import { CalendarDotIcon, ShuffleIcon, TrophyIcon } from "@phosphor-icons/react/ssr";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader, Section } from "@/components/blocks";
@@ -52,6 +52,9 @@ export default function XIPage() {
                 </Button>
                 <Button asChild size="lg" variant="outline">
                   <Link href={`/xi/${f}/draft`}><ShuffleIcon />Random draw</Link>
+                </Button>
+                <Button asChild size="lg" variant="ghost">
+                  <Link href={`/xi/leaderboard?format=${f}`}><TrophyIcon />Leaderboard</Link>
                 </Button>
               </div>
             </div>

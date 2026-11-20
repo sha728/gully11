@@ -61,6 +61,10 @@ class Captain(BaseModel):
     player: str | None = None        # one of your picks; None = let the engine choose
 
 
+class EntryName(BaseModel):
+    name: str = Field(min_length=2, max_length=20, pattern=r"^[A-Za-z0-9 _.\-]+$")
+
+
 class Move(BaseModel):
     src: int = Field(ge=1, le=11, alias="from")
     dst: int = Field(ge=1, le=11, alias="to")
@@ -218,6 +222,13 @@ def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
         conn.execute(
             "INSERT INTO sim_results (context, ref, match_no, match_json) VALUES ('xi', %s, %s, %s) "
             "ON CONFLICT (context, ref, match_no) DO NOTHING", (out["slug"], i, Jsonb(m)))
+    if row["daily"]:
+        t = out["result"]
+        conn.execute(
+            """INSERT INTO xi_daily_entries (draft_id, format, day, slug, won, lost, tied, drawn, points, run_diff)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (draft_id) DO NOTHING""",
+            (row["id"], row["format"], row["daily"], out["slug"], t["won"], t["lost"], t["tied"], t["drawn"],
+             2 * t["won"] + t["tied"] + t["drawn"], service.run_difference(out["matches"])))
     _save(conn, row, challenge=out["slug"])
     conn.commit()
     return {"slug": out["slug"], "rival": row["rival"]}
@@ -248,3 +259,48 @@ def challenge_match(slug: str, n: int, conn=Depends(get_conn)) -> dict[str, Any]
     if row is None:
         raise HTTPException(404, "Match not found")
     return row["match_json"]
+
+
+# ------------------------------------------------------------------ daily leaderboard
+
+BOARD_SIZE = 50
+
+
+@router.get("/leaderboard/{fmt}")
+def daily_board(fmt: XIFormat, day: date | None = None, draft: str | None = None,
+                conn=Depends(get_conn)) -> dict[str, Any]:
+    """The daily challenge leaderboard for one format and day (default today):
+    the top 50 by points, then run difference, then who played first. ``draft``:
+    your daily draft's id, to find your own entry wherever it ranks."""
+    day = day or _today()
+    ranked = """SELECT draft_id, slug, name, won, lost, tied, drawn, points, run_diff, created_at,
+                       RANK() OVER (ORDER BY points DESC, run_diff DESC) AS rank
+                FROM xi_daily_entries WHERE format = %s AND day = %s"""
+    rows = conn.execute(f"{ranked} ORDER BY rank, created_at LIMIT %s", (fmt, day, BOARD_SIZE)).fetchall()
+    total = conn.execute("SELECT count(*) AS n FROM xi_daily_entries WHERE format = %s AND day = %s",
+                         (fmt, day)).fetchone()["n"]
+    you = None
+    if draft:
+        you = conn.execute(f"SELECT * FROM ({ranked}) r WHERE draft_id = %s", (fmt, day, draft)).fetchone()
+
+    def public(r: dict) -> dict:
+        return {"rank": r["rank"], "name": r["name"], "slug": r["slug"], "won": r["won"], "lost": r["lost"],
+                "tied": r["tied"], "drawn": r["drawn"], "points": r["points"], "run_diff": r["run_diff"],
+                "you": bool(draft) and r["draft_id"] == draft}
+
+    return {"format": fmt, "day": day.isoformat(), "today": _today().isoformat(), "total": total,
+            "rows": [public(r) for r in rows], "you": public(you) if you else None}
+
+
+@router.put("/leaderboard/entries/{draft_id}/name")
+def name_entry(draft_id: str, req: EntryName, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Put a nickname on your daily entry (whoever holds the draft id can)."""
+    name = " ".join(req.name.split())
+    if len(name) < 2:
+        raise HTTPException(422, "Pick a name of at least 2 characters.")
+    row = conn.execute("UPDATE xi_daily_entries SET name = %s WHERE draft_id = %s RETURNING draft_id",
+                       (name, draft_id)).fetchone()
+    if row is None:
+        raise HTTPException(404, "No daily entry for that draft.")
+    conn.commit()
+    return {"ok": True, "name": name}

@@ -66,3 +66,22 @@ CREATE TABLE IF NOT EXISTS seasons (
 
 -- The captain the person picked for their XI (null: the best-rated captain in it).
 ALTER TABLE xi_drafts ADD COLUMN IF NOT EXISTS captain text;
+
+-- Daily challenge leaderboard: one entry per daily draft played (the draft id is
+-- the only "account": whoever holds it can name the entry). Ranked by points
+-- (win 2, tie or draw 1), then run difference across the five matches.
+CREATE TABLE IF NOT EXISTS xi_daily_entries (
+    draft_id    text PRIMARY KEY REFERENCES xi_drafts(id),
+    format      text NOT NULL,
+    day         date NOT NULL,
+    slug        text NOT NULL REFERENCES xi_challenges(slug),
+    name        text,                       -- nickname; null shows as "Anonymous"
+    won         integer NOT NULL,
+    lost        integer NOT NULL,
+    tied        integer NOT NULL,
+    drawn       integer NOT NULL,
+    points      integer NOT NULL,
+    run_diff    integer NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS xi_daily_entries_board ON xi_daily_entries (format, day, points DESC, run_diff DESC, created_at);

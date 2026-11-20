@@ -211,7 +211,53 @@ export const xiApi = {
   play: (id: string) => call<{ slug: string; rival: string | null }>(`${draftPath(id)}/play`, post()),
   challenge: (slug: string) => call<Challenge>(`/xi/challenge/${encodeURIComponent(slug)}`),
   match: (slug: string, n: number) => call<FullMatch>(`/xi/challenge/${encodeURIComponent(slug)}/match/${n}`),
+  leaderboard: (format: XIFormat, opts: { day?: string; draft?: string | null } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.day) q.set("day", opts.day);
+    if (opts.draft) q.set("draft", opts.draft);
+    return call<Leaderboard>(`/xi/leaderboard/${format}${q.size ? `?${q}` : ""}`);
+  },
+  nameEntry: (draftId: string, name: string) =>
+    call<{ ok: boolean; name: string }>(`/xi/leaderboard/entries/${encodeURIComponent(draftId)}/name`,
+      { method: "PUT", body: JSON.stringify({ name }) }),
 };
+
+export interface BoardRow {
+  rank: number;
+  name: string | null;
+  slug: string;
+  won: number;
+  lost: number;
+  tied: number;
+  drawn: number;
+  points: number;
+  run_diff: number;
+  you: boolean;
+}
+
+export interface Leaderboard {
+  format: XIFormat;
+  day: string;
+  today: string;
+  total: number;
+  rows: BoardRow[];
+  you: BoardRow | null;
+}
+
+// The daily draft this browser played, per format and day: the leaderboard knows
+// you by it (there are no accounts), and only its holder can name the entry.
+const dailyKey = (format: string, day: string) => `gully11:daily:${format}:${day}`;
+export function rememberDaily(format: string, day: string, draftId: string) {
+  try { localStorage.setItem(dailyKey(format, day), draftId); } catch { /* storage blocked */ }
+}
+export function dailyDraft(format: string, day: string): string | null {
+  try { return localStorage.getItem(dailyKey(format, day)); } catch { return null; }
+}
+
+/** "W3 L2", with ties and draws when there are any. */
+export function recordText(r: Pick<BoardRow, "won" | "lost" | "tied" | "drawn">): string {
+  return [`W${r.won}`, `L${r.lost}`, r.drawn ? `D${r.drawn}` : "", r.tied ? `T${r.tied}` : ""].filter(Boolean).join(" ");
+}
 
 export const isOverseas = (c: Pick<Candidate, "country">) => !!c.country && c.country !== "India";
 export const KEEPER_SLOT = 6;

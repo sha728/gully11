@@ -570,6 +570,13 @@ capped AS (
     SELECT DISTINCT mp.player_id AS pid
     FROM mp JOIN match_formats f USING (match_id)
     WHERE f.format IN ('Test', 'ODI', 'T20I')
+),
+-- India's domestic T20 is for Indian players only: the last word on nationality
+-- for uncapped players Wikidata has no country for.
+indian_domestic AS (
+    SELECT DISTINCT mp.player_id AS pid
+    FROM mp JOIN m USING (match_id)
+    WHERE m.event_name = 'Syed Mushtaq Ali Trophy'
 )
 SELECT s.pid AS id,
        s.pid AS cricsheet_id,
@@ -579,7 +586,7 @@ SELECT s.pid AS id,
        coalesce(nullif(wd.name_en, ''),
                 nullif(regexp_replace(wd.wikipedia_title, ' \\(.*\\)$', ''), '')) AS full_name,
        nullif(wd.wikipedia_title, '') AS wikipedia_title,
-       i.country,
+       coalesce(i.country, nf.country, nullif(wd.country, ''), CASE WHEN dom.pid IS NOT NULL THEN 'India' END) AS country,
        CASE
            WHEN coalesce(st.n, 0) >= 2 OR (st.n = 1 AND s.matches < 15) THEN 'WK'
            WHEN s.bowl_share >= {BOWL_SHARE_MIN} AND s.bat_share >= {BAT_SHARE_AR_MIN} THEN 'AR'
@@ -590,7 +597,10 @@ SELECT s.pid AS id,
        CASE WHEN coalesce(sp.wk, 0) < {SPIN_MIN_WICKETS} THEN NULL
             WHEN sp.st >= 1 AND sp.st >= {SPIN_STUMPED_SHARE} * sp.wk THEN 'spin'
             ELSE 'pace' END AS bowling_style,
-       CASE WHEN i.country IS NULL THEN NULL ELSE i.country <> 'India' END AS is_overseas_for_ipl,
+       CASE WHEN coalesce(i.country, nf.country, nullif(wd.country, ''), CASE WHEN dom.pid IS NOT NULL THEN 'India' END) IS NULL
+            THEN NULL
+            ELSE coalesce(i.country, nf.country, nullif(wd.country, ''), CASE WHEN dom.pid IS NOT NULL THEN 'India' END) <> 'India'
+       END AS is_overseas_for_ipl,
        c.pid IS NOT NULL AS capped,
        s.era_start::INTEGER AS era_start,
        s.era_end::INTEGER AS era_end,
@@ -601,10 +611,12 @@ SELECT s.pid AS id,
 FROM share s
 LEFT JOIN people p ON p.identifier = s.pid
 LEFT JOIN wd ON wd.cricinfo_id = p.key_cricinfo
+LEFT JOIN natfix nf ON nf.cricinfo_id = p.key_cricinfo
 LEFT JOIN stumps st ON st.pid = s.pid
 LEFT JOIN spin sp ON sp.pid = s.pid
 LEFT JOIN intl i ON i.pid = s.pid
 LEFT JOIN capped c ON c.pid = s.pid
+LEFT JOIN indian_domestic dom ON dom.pid = s.pid
 ORDER BY s.pid;
 """
 
@@ -807,7 +819,17 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
                         f"'{names.as_posix()}', header = true, all_varchar = true)")
         else:
             con.execute("CREATE OR REPLACE TEMP TABLE wd "
-                        "(cricinfo_id VARCHAR, name_en VARCHAR, wikipedia_title VARCHAR)")
+                        "(cricinfo_id VARCHAR, name_en VARCHAR, wikipedia_title VARCHAR, country VARCHAR)")
+        # Hand-checked nationalities where Wikidata is wrong (reference/nationality_fixes.csv).
+        fixes = names.with_name("nationality_fixes.csv")
+        if fixes.exists():
+            con.execute(f"CREATE OR REPLACE TEMP TABLE natfix AS SELECT cricinfo_id, country FROM read_csv("
+                        f"'{fixes.as_posix()}', header = true, all_varchar = true)")
+        else:
+            con.execute("CREATE OR REPLACE TEMP TABLE natfix (cricinfo_id VARCHAR, country VARCHAR)")
+        cols = {r[0] for r in con.execute("DESCRIBE wd").fetchall()}
+        if "country" not in cols:   # a names file from before nationality was added
+            con.execute("ALTER TABLE wd ADD COLUMN country VARCHAR")
         con.execute(FORMATS_SQL)
         con.execute(INNINGS_SQL)
         con.execute(stats_sql("player_format_stats", ["format"]))

@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ROLE_LABEL } from "@/lib/api";
 import { loadSeat, money } from "@/lib/auction";
 import { seasonApi, watched, type CapRow, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
@@ -378,18 +379,76 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
           <p className="font-mono text-[10px] text-muted-foreground">Top four reach the playoffs. 2 points a win, 1 a tie; net run rate breaks ties.</p>
         </section>
 
-        <section className="space-y-2">
-          <div className="label">Results</div>
-          <ol className="max-h-[32rem] divide-y overflow-y-auto border-y">
-            {played === 0 && <li className="py-3 text-sm text-muted-foreground">No matches yet.</li>}
-            {[...season.matches].reverse().map((m) => <ResultRow key={m.match} code={code} m={m} idOf={idOf} youName={youName} />)}
-          </ol>
-        </section>
+        <LatestResults code={code} matches={season.matches} rows={season.table.length} idOf={idOf} youName={youName} />
       </div>
 
       {played > 0 && <Caps season={season} idOf={idOf} youName={youName} />}
       {!season.champion && <EveryXi teams={view.teams} you={you} />}
     </div>
+  );
+}
+
+const STAGE_SHORT: Record<string, string> = { "Qualifier 1": "Q1", Eliminator: "EL", "Qualifier 2": "Q2", Final: "Final" };
+
+/** The latest results, one line each, as many as the points table has rows so the
+ * two boxes line up; every result in a side panel. */
+function LatestResults({ code, matches, rows, idOf, youName }: {
+  code: string; matches: MatchSummary[]; rows: number; idOf: Record<string, string>; youName: string | null;
+}) {
+  const latest = [...matches].reverse().slice(0, rows);
+  return (
+    <section className="space-y-2">
+      <div className="label">Latest results</div>
+      <table className="w-full table-fixed text-sm">
+        <thead>
+          <tr className="font-mono text-[10px] text-muted-foreground uppercase">
+            <th className="w-12 py-1.5 text-left font-normal">#</th>
+            <th className="text-left font-normal">Match</th>
+            <th className="w-24 text-right font-normal">Result</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y border-y font-mono tnum">
+          {latest.length === 0 && <tr><td colSpan={3} className="py-1.5 font-sans text-muted-foreground">No matches yet.</td></tr>}
+          {latest.map((m) => {
+            const mine = youName && m.teams.includes(youName);
+            const outcome = !mine ? null : m.winner === youName ? "W" : m.winner ? "L" : "T";
+            return (
+              <tr key={m.match} className={cn("hover:bg-muted", mine && "bg-signal/5")}>
+                <td className="py-1.5 text-muted-foreground">{m.stage === "League" ? m.match : STAGE_SHORT[m.stage]}</td>
+                <td className="truncate">
+                  <Link href={`/auction/${code}/season/match/${m.match}`} className="hover:text-signal">
+                    {m.scores.map((sc) => `${idOf[sc.team]} ${sc.runs}/${sc.wickets}`).join(" v ")}
+                  </Link>
+                </td>
+                <td className="text-right">
+                  {m.winner ? `${idOf[m.winner]} won` : "Tied"}
+                  {outcome && <span className={cn("ml-1.5 inline-block w-4 text-center text-[10px] font-bold", outcome === "W" ? "bg-signal text-signal-foreground" : "border")}>{outcome}</span>}
+                </td>
+              </tr>
+            );
+          })}
+          {/* Early in the season: blank rows keep the box the size of the points table. */}
+          {Array.from({ length: Math.max(0, rows - Math.max(latest.length, 1)) }, (_, i) => (
+            <tr key={`pad${i}`} aria-hidden><td colSpan={3} className="py-1.5">&nbsp;</td></tr>
+          ))}
+        </tbody>
+      </table>
+      {matches.length > 0 && (
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button variant="outline" size="sm" className="font-mono text-[11px] uppercase">All results ({matches.length})</Button>
+          </SheetTrigger>
+          <SheetContent side="right" className="w-full gap-0 sm:max-w-md">
+            <SheetHeader className="border-b">
+              <SheetTitle>All results</SheetTitle>
+            </SheetHeader>
+            <ol className="divide-y overflow-y-auto px-2">
+              {[...matches].reverse().map((m) => <ResultRow key={m.match} code={code} m={m} idOf={idOf} youName={youName} />)}
+            </ol>
+          </SheetContent>
+        </Sheet>
+      )}
+    </section>
   );
 }
 

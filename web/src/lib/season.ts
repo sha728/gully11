@@ -1,5 +1,5 @@
-// The season after an auction: setup (XIs), the played season, and how far this
-// viewer has got through it (kept in this browser, so the table fills in as you go).
+// The season after an auction: XIs (set before or between matches) and the
+// season so far, which the host moves on one match (or more) at a time.
 
 import { API_URL, type Role } from "@/lib/api";
 import type { FullMatch } from "@/lib/xi";
@@ -36,29 +36,39 @@ export interface MatchSummary {
   scores: { team: string; runs: number; wickets: number; overs: string }[];
   top_scorer: { name: string; runs: number; balls: number };
   best_bowler: { name: string; wickets: number; runs: number };
+  lineups: Record<string, { xi: string[]; impact: string | null; picked: boolean }>;
 }
 
 export interface CapRow { id: string; name: string; team: string; runs?: number; balls?: number; wickets?: number }
 
+export interface TableRow {
+  team: string; played: number; won: number; lost: number; tied: number; points: number; nrr: number;
+}
+
+/** The season so far (the server's state: grows as the host moves it on). */
 export interface Season {
   teams: { id: string; name: string }[];
   matches: MatchSummary[];
   table: TableRow[];
-  champion: { id: string; name: string };
-  runner_up: { id: string; name: string };
+  champion: { id: string; name: string } | null;
+  runner_up: { id: string; name: string } | null;
   caps: { orange: CapRow[]; purple: CapRow[] };
-  lineups: Record<string, { xi: string[]; impact: string | null; picked: boolean }>;
   format: string;
 }
+
+export interface Fixture { stage: MatchSummary["stage"]; home: string; away: string; match: number }
 
 export interface SeasonView {
   code: string;
   mode: string;
   you: string | null;
   host: boolean;
-  played: boolean;
-  teams?: SetupTeam[];
-  season?: Season;
+  started: boolean;
+  finished: boolean;
+  total: number | null;
+  next: Fixture | null;
+  teams: SetupTeam[];
+  season: Season | null;
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -79,50 +89,19 @@ export const seasonApi = {
   get: (code: string, token: string | null) => call<SeasonView>(`${base(code)}${token ? `?token=${encodeURIComponent(token)}` : ""}`),
   lineup: (code: string, token: string, xi: string[], impact: string | null) =>
     call<{ ok: boolean }>(`${base(code)}/lineup`, { method: "PUT", body: JSON.stringify({ token, xi, impact }) }),
-  play: (code: string, token: string | null) =>
-    call<{ season: Season }>(`${base(code)}/play`, { method: "POST", body: JSON.stringify({ token }) }),
+  start: (code: string, token: string | null) =>
+    call<SeasonView>(`${base(code)}/start`, { method: "POST", body: JSON.stringify({ token }) }),
+  advance: (code: string, token: string | null, how: "next" | "mine" | "end") =>
+    call<SeasonView>(`${base(code)}/advance`, { method: "POST", body: JSON.stringify({ token, how }) }),
   match: (code: string, n: number) => call<FullMatch>(`${base(code)}/match/${n}`),
 };
 
-// How many matches this viewer has seen.
-const progressKey = (code: string) => `gully11:season:${code.toUpperCase()}`;
-export function loadProgress(code: string): number {
-  try { return Number(localStorage.getItem(progressKey(code)) ?? 0) || 0; } catch { return 0; }
+// Matches of yours this browser has watched, so a fresh result of yours offers
+// "watch it live" rather than just appearing in the list.
+const watchedKey = (code: string) => `gully11:season-watched:${code.toUpperCase()}`;
+export function watched(code: string): number[] {
+  try { return JSON.parse(localStorage.getItem(watchedKey(code)) ?? "[]"); } catch { return []; }
 }
-export function saveProgress(code: string, n: number) {
-  try { localStorage.setItem(progressKey(code), String(Math.max(n, loadProgress(code)))); } catch { /* storage blocked */ }
-}
-
-export interface TableRow {
-  team: string; played: number; won: number; lost: number; tied: number; points: number; nrr: number;
-}
-
-function balls(overs: string) {
-  const [o, b] = overs.split(".");
-  return Number(o) * 6 + Number(b ?? 0);
-}
-
-/** The points table after the league matches given (same rules as the server:
- * 2 for a win, 1 for a tie; net run rate with an all-out side charged 20 overs). */
-export function pointsTable(matches: MatchSummary[], teams: string[]): TableRow[] {
-  const rows = Object.fromEntries(teams.map((t) => [t, { team: t, played: 0, won: 0, lost: 0, tied: 0, points: 0, fr: 0, fb: 0, ar: 0, ab: 0 }]));
-  for (const m of matches) {
-    if (m.stage !== "League") continue;
-    m.scores.forEach((s, i) => {
-      const bat = rows[s.team], bowl = rows[m.scores[1 - i].team];
-      const b = s.wickets >= 10 ? 120 : balls(s.overs);
-      bat.fr += s.runs; bat.fb += b; bowl.ar += s.runs; bowl.ab += b;
-    });
-    for (const t of m.teams) {
-      const r = rows[t];
-      r.played++;
-      if (m.winner == null) { r.tied++; r.points++; }
-      else if (m.winner === t) { r.won++; r.points += 2; }
-      else r.lost++;
-    }
-  }
-  return Object.values(rows)
-    .map((r) => ({ team: r.team, played: r.played, won: r.won, lost: r.lost, tied: r.tied, points: r.points,
-      nrr: Math.round(((r.fb ? 6 * r.fr / r.fb : 0) - (r.ab ? 6 * r.ar / r.ab : 0)) * 1000) / 1000 }))
-    .sort((a, b) => b.points - a.points || b.nrr - a.nrr || a.team.localeCompare(b.team));
+export function markWatched(code: string, n: number) {
+  try { localStorage.setItem(watchedKey(code), JSON.stringify([...new Set([...watched(code), n])])); } catch { /* storage blocked */ }
 }

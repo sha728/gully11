@@ -6,11 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MatchStage } from "@/components/xi/match-viewer";
 import { loadSeat } from "@/lib/auction";
-import { saveProgress, seasonApi, type SeasonView } from "@/lib/season";
+import { markWatched, seasonApi, type SeasonView } from "@/lib/season";
 import type { FullMatch } from "@/lib/xi";
 
 /** One season match, watched live (the result hidden until the last ball) or as a
- * finished replay. Watching it live counts it as seen in the season view. */
+ * finished replay. Watching it to the end marks it as watched. */
 export function SeasonMatch({ code, n, live }: { code: string; n: number; live: boolean }) {
   const [view, setView] = useState<SeasonView | null>(null);
   const [match, setMatch] = useState<FullMatch | null>(null);
@@ -45,7 +45,7 @@ export function SeasonMatch({ code, n, live }: { code: string; n: number; live: 
         )}
       </div>
       <MatchStage match={match} format="IPL" live={live} who={who} you={youName}
-        kicker={<>Match {n} of {season.matches.length} · {summary?.stage ?? "League"} · {who(match.teams[0])} v {who(match.teams[1])}</>}
+        kicker={<>Match {n} · {summary?.stage ?? "League"} · {who(match.teams[0])} v {who(match.teams[1])}</>}
         after={
           <div className="flex flex-wrap items-center gap-4 border-l-2 border-signal pl-4">
             <SeenMarker code={code} n={n} />
@@ -59,6 +59,6 @@ export function SeasonMatch({ code, n, live }: { code: string; n: number; live: 
 }
 
 function SeenMarker({ code, n }: { code: string; n: number }) {
-  useEffect(() => saveProgress(code, n), [code, n]);
-  return <div className="text-sm text-muted-foreground">Result in. The table has moved on to match {n}.</div>;
+  useEffect(() => markWatched(code, n), [code, n]);
+  return <div className="text-sm text-muted-foreground">Full time. The table has it.</div>;
 }

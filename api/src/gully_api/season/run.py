@@ -1,15 +1,18 @@
-"""Play a season: league, table, playoffs, caps. Pure: takes the teams, returns
-the result and every full match.
+"""A season played one match at a time.
+
+The state is plain JSON (kept in ``seasons.result``): the league fixtures, the
+results so far, playoff outcomes and running cap tallies. ``play_next`` simulates
+the next fixture with whatever XIs the teams field *at that moment*, so a team
+can change its XI between matches. Results don't exist until they're played.
 
 Points: 2 for a win, 1 each for a tie (the engine has no super over). The table
 is sorted by points, then net run rate, IPL style: runs per over scored minus
 conceded, a side bowled out counted as having faced its full 20 overs. A tied
-playoff goes to the team higher in the table.
+playoff goes to the team higher in the table. Playoff fixtures are drawn once the
+league stage is over.
 """
 
 from __future__ import annotations
-
-from collections import defaultdict
 
 from ..sim.engine import Team, simulate_match
 from ..sim.rates import Env
@@ -17,11 +20,11 @@ from .schedule import league, playoff_plan
 
 
 def _balls(overs: str) -> int:
-    o, _, b = overs.partition(".")
+    o, _, b = str(overs).partition(".")
     return int(o) * 6 + int(b or 0)
 
 
-def _summary(n: int, stage: str, m) -> dict:
+def _summary(n: int, stage: str, m, lineups: dict) -> dict:
     d = m.to_dict()
     bats = [b for inn in d["innings"] for b in inn["batting_card"]]
     bowls = [b for inn in d["innings"] for b in inn["bowling_card"]]
@@ -34,6 +37,7 @@ def _summary(n: int, stage: str, m) -> dict:
                    for i in d["innings"]],
         "top_scorer": {"name": top["name"], "runs": top["runs"], "balls": top["balls"]},
         "best_bowler": {"name": best["name"], "wickets": best["wickets"], "runs": best["runs"]},
+        "lineups": lineups,                     # the XIs used: {franchise: {"xi", "impact"}}
     }
 
 
@@ -68,72 +72,99 @@ def table(summaries: list[dict], teams: list[str], overs: int = 20) -> list[dict
     return sorted(rows.values(), key=lambda r: (-r["points"], -r["nrr"], r["team"]))
 
 
-def caps(matches: list[dict]) -> dict:
-    """Orange Cap (runs) and Purple Cap (wickets), top five each."""
-    runs: dict[str, dict] = defaultdict(lambda: {"runs": 0, "balls": 0, "innings": 0})
-    wkts: dict[str, dict] = defaultdict(lambda: {"wickets": 0, "runs": 0, "balls": 0})
-    team_of: dict[str, str] = {}
-    for m in matches:
-        for inn in m["innings"]:
-            for b in inn["batting_card"]:
-                if b["how_out"]:
-                    r = runs[b["id"]]
-                    r["name"], r["runs"], r["balls"], r["innings"] = b["name"], r["runs"] + b["runs"], r["balls"] + b["balls"], r["innings"] + 1
-                    team_of[b["id"]] = inn["batting"]
-            for b in inn["bowling_card"]:
-                w = wkts[b["id"]]
-                w["name"], w["wickets"], w["runs"] = b["name"], w["wickets"] + b["wickets"], w["runs"] + b["runs"]
-                w["balls"] += _balls(str(b["overs"]))
-                team_of[b["id"]] = inn["bowling"]
-    orange = sorted(({"id": k, "team": team_of[k], **v} for k, v in runs.items()), key=lambda r: (-r["runs"], r["balls"]))[:5]
-    purple = sorted(({"id": k, "team": team_of[k], **v} for k, v in wkts.items()), key=lambda r: (-r["wickets"], r["runs"]))[:5]
-    return {"orange": orange, "purple": purple}
-
-
-def play(teams: dict[str, Team], env: Env, seed: int) -> tuple[dict, list[dict]]:
-    """``teams`` maps franchise id -> Team (named after the franchise). Returns the
-    result and the full matches (in playing order)."""
+def start(teams: dict[str, str], seed: int) -> dict:
+    """A new season for ``teams`` (franchise id -> name): fixtures drawn, nothing played."""
     ids = list(teams)
-    name = {fid: t.name for fid, t in teams.items()}
-    fid_of = {t.name: fid for fid, t in teams.items()}
-    summaries, full = [], []
+    return {
+        "teams": [{"id": f, "name": n} for f, n in teams.items()],
+        "seed": seed,
+        "fixtures": [{"stage": "League", "home": a, "away": b} for a, b in league(ids, seed)],
+        "matches": [],
+        "playoffs": {},                          # stage -> {"winner", "loser"} (franchise ids)
+        "tally": {"runs": {}, "wickets": {}},    # player id -> running totals
+        "table": table([], list(teams.values())),
+        "champion": None,
+        "runner_up": None,
+        "caps": {"orange": [], "purple": []},
+        "format": "IPL (two groups, 14 matches each)" if len(ids) == 10 else "Double round robin",
+    }
 
-    def run(a: str, b: str, stage: str) -> dict:
-        n = len(full) + 1
-        m = simulate_match(teams[a], teams[b], env, seed=seed * 1000 + n)
-        full.append(m.to_dict())
-        s = _summary(n, stage, m)
-        summaries.append(s)
-        return s
 
-    for a, b in league(ids, seed):
-        run(a, b, "League")
-    standings = table(summaries, [name[f] for f in ids])
-    seeds = {i + 1: fid_of[r["team"]] for i, r in enumerate(standings)}
-    rank = {fid_of[r["team"]]: i for i, r in enumerate(standings)}
+def _ids(state: dict) -> dict[str, str]:
+    return {t["name"]: t["id"] for t in state["teams"]}
 
-    outcome: dict[str, tuple[str, str]] = {}            # stage -> (winner, loser)
-    for stage, x, y in playoff_plan(len(ids)):
+
+def next_fixture(state: dict) -> dict | None:
+    """The next match to play (drawing playoff fixtures once the league is done)."""
+    n = len(state["matches"])
+    league_left = [f for f in state["fixtures"] if f["stage"] == "League"]
+    if n < len(league_left):
+        return state["fixtures"][n]
+    if state["champion"]:
+        return None
+    seeds = {i + 1: _ids(state)[r["team"]] for i, r in enumerate(state["table"])}
+    for stage, x, y in playoff_plan(len(state["teams"])):
+        if stage in state["playoffs"]:
+            continue
         def pick(ref):
             kind, key = ref
             if kind == "seed":
                 return seeds[key]
-            return outcome[key][0 if kind == "winner" else 1]
+            done = state["playoffs"].get(key)
+            return done and done["winner" if kind == "winner" else "loser"]
         a, b = pick(x), pick(y)
-        s = run(a, b, stage)
-        if s["winner"] is None:                         # tie: the higher-placed team goes through
+        if a and b:
+            return {"stage": stage, "home": a, "away": b}
+    return None
+
+
+def _caps(state: dict) -> dict:
+    t = state["tally"]
+    orange = sorted(({"id": k, **v} for k, v in t["runs"].items()), key=lambda r: (-r["runs"], r["balls"]))[:5]
+    purple = sorted(({"id": k, **v} for k, v in t["wickets"].items()), key=lambda r: (-r["wickets"], r["runs"]))[:5]
+    return {"orange": orange, "purple": purple}
+
+
+def play_next(state: dict, teams: dict[str, Team], lineups: dict[str, dict], env: Env) -> dict | None:
+    """Simulate the next fixture with the given Teams (franchise id -> Team, as they
+    are now). Updates ``state``; returns the full match, or None if it's over."""
+    fx = next_fixture(state)
+    if fx is None:
+        return None
+    n = len(state["matches"]) + 1
+    a, b = fx["home"], fx["away"]
+    m = simulate_match(teams[a], teams[b], env, seed=state["seed"] * 1000 + n)
+    full = m.to_dict()
+    s = _summary(n, fx["stage"], m, {a: lineups[a], b: lineups[b]})
+    state["matches"].append(s)
+    name = {t["id"]: t["name"] for t in state["teams"]}
+    for inn in full["innings"]:
+        for bt in inn["batting_card"]:
+            if bt["how_out"]:
+                r = state["tally"]["runs"].setdefault(bt["id"], {"name": bt["name"], "team": inn["batting"], "runs": 0, "balls": 0})
+                r["runs"] += bt["runs"]
+                r["balls"] += bt["balls"]
+        for bw in inn["bowling_card"]:
+            w = state["tally"]["wickets"].setdefault(bw["id"], {"name": bw["name"], "team": inn["bowling"], "wickets": 0, "runs": 0})
+            w["wickets"] += bw["wickets"]
+            w["runs"] += bw["runs"]
+    if fx["stage"] == "League":
+        state["table"] = table(state["matches"], [t["name"] for t in state["teams"]])
+    else:
+        rank = {_ids(state)[r["team"]]: i for i, r in enumerate(state["table"])}
+        if s["winner"] is None:
             win = min((a, b), key=lambda f: rank[f])
             s["margin"] = f"tied; {name[win]} go through on league position"
         else:
-            win = fid_of[s["winner"]]
-        outcome[stage] = (win, b if win == a else a)
+            win = _ids(state)[s["winner"]]
+        state["playoffs"][fx["stage"]] = {"winner": win, "loser": b if win == a else a}
+        if fx["stage"] == "Final":
+            state["champion"] = {"id": win, "name": name[win]}
+            lose = state["playoffs"]["Final"]["loser"]
+            state["runner_up"] = {"id": lose, "name": name[lose]}
+    state["caps"] = _caps(state)
+    return full
 
-    champion = outcome["Final"][0]
-    return {
-        "teams": [{"id": f, "name": name[f]} for f in ids],
-        "matches": summaries,
-        "table": standings,
-        "champion": {"id": champion, "name": name[champion]},
-        "runner_up": {"id": outcome["Final"][1], "name": name[outcome["Final"][1]]},
-        "caps": caps(full),
-    }, full
+
+def total_matches(state: dict) -> int:
+    return len([f for f in state["fixtures"] if f["stage"] == "League"]) + len(playoff_plan(len(state["teams"])))

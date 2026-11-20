@@ -1,18 +1,16 @@
 "use client";
 
 import {
-  ArrowDownIcon, ArrowUpIcon, CrownIcon, FastForwardIcon, PlayIcon, PlusIcon, SkipForwardIcon, TrophyIcon, XIcon,
+  ArrowDownIcon, ArrowUpIcon, CaretDownIcon, CrownIcon, FastForwardIcon, PlayIcon, PlusIcon, SkipForwardIcon, TrophyIcon, XIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ROLE_LABEL } from "@/lib/api";
 import { loadSeat, money } from "@/lib/auction";
-import {
-  loadProgress, pointsTable, saveProgress, seasonApi,
-  type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam,
-} from "@/lib/season";
+import { seasonApi, watched, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
 import { cn } from "@/lib/utils";
 
 export function SeasonRoom({ code }: { code: string }) {
@@ -34,35 +32,34 @@ export function SeasonRoom({ code }: { code: string }) {
     load(t);
   }, [code, load]);
 
-  // Waiting for the host: look again every few seconds.
+  // Everyone but the host follows along: look again every few seconds.
   useEffect(() => {
-    if (!view || view.played || view.host) return;
-    const id = setInterval(() => load(token), 5000);
+    if (!view || view.host || view.finished) return;
+    const id = setInterval(() => load(token), 4000);
     return () => clearInterval(id);
   }, [view, token, load]);
 
   if (error) return <div className="grid min-h-[40vh] place-items-center text-destructive">{error}</div>;
   if (!view) return <div className="grid min-h-[40vh] place-items-center text-muted-foreground">Loading the season…</div>;
-  if (view.played && view.season) return <SeasonBoard code={code} season={view.season} you={view.you} />;
-  return <Setup code={code} view={view} token={token} onPlayed={() => load(token)} />;
+  if (view.started && view.season) return <SeasonBoard code={code} view={view} token={token} setView={setView} />;
+  return <Setup code={code} view={view} token={token} setView={setView} />;
 }
 
 // ---------------------------------------------------------------- setup
 
-function Setup({ code, view, token, onPlayed }: { code: string; view: SeasonView; token: string | null; onPlayed: () => void }) {
-  const teams = view.teams ?? [];
+function Setup({ code, view, token, setView }: { code: string; view: SeasonView; token: string | null; setView: (v: SeasonView) => void }) {
+  const teams = view.teams;
   const mine = teams.find((t) => t.id === view.you);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function play() {
+  async function start() {
     setBusy(true);
     setError(null);
     try {
-      await seasonApi.play(code, token);
-      onPlayed();
+      setView(await seasonApi.start(code, token));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't play the season.");
+      setError(e instanceof Error ? e.message : "Couldn't start the season.");
       setBusy(false);
     }
   }
@@ -74,8 +71,8 @@ function Setup({ code, view, token, onPlayed }: { code: string; view: SeasonView
         <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">Pick your <span className="text-signal">XI</span></h1>
         <div className="seam mt-5" aria-hidden />
         <p className="mt-4 max-w-2xl text-muted-foreground">
-          Every franchise plays the season with the same eleven and an Impact sub: a bench bowler who bowls but doesn&apos;t bat.
-          Bots pick their best XI; yours starts as the engine&apos;s pick, so change it or keep it.
+          Every franchise fields an XI and an Impact sub: a bench bowler who bowls but doesn&apos;t bat. Bots pick their best;
+          yours starts as the engine&apos;s pick. You can change it now or between any of your matches.
         </p>
       </div>
 
@@ -87,32 +84,40 @@ function Setup({ code, view, token, onPlayed }: { code: string; view: SeasonView
           <div className="label">Starting the season</div>
           {view.host ? (
             <>
-              <p className="text-sm text-muted-foreground">Everyone ready? The whole season is simulated at once (a few seconds); then you go through it match by match.</p>
-              <Button size="lg" disabled={busy} onClick={play} className="h-12 font-mono uppercase">
-                <PlayIcon weight="fill" />{busy ? "Playing 74 matches…" : "Play the season"}
+              <p className="text-sm text-muted-foreground">You&apos;re the host: you move the season on, a match at a time or further. Everyone else follows along.</p>
+              <Button size="lg" disabled={busy} onClick={start} className="h-12 font-mono uppercase">
+                <PlayIcon weight="fill" />{busy ? "Drawing the fixtures…" : "Start the season"}
               </Button>
             </>
           ) : (
             <p className="text-sm text-muted-foreground">Waiting for the host to start the season. This page updates by itself.</p>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="label pt-4">Every XI</div>
-          <ul className="divide-y border-y text-xs">
-            {teams.map((t) => (
-              <li key={t.id} className="py-2">
-                <div className="flex justify-between gap-2">
-                  <span className="font-semibold">{t.name}</span>
-                  <span className="font-mono text-[10px] text-muted-foreground uppercase">{t.id === view.you ? "you" : t.bot ? "bot" : t.owner}{t.picked ? " · picked" : " · auto"}</span>
-                </div>
-                <div className="mt-0.5 text-muted-foreground">
-                  {t.xi.map((id) => t.players.find((p) => p.id === id)?.name).join(", ")}
-                  {t.impact && <> · <span className="text-foreground">sub {t.players.find((p) => p.id === t.impact)?.name}</span></>}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <EveryXi teams={teams} you={view.you} />
         </section>
       </div>
+    </div>
+  );
+}
+
+function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
+  return (
+    <div>
+      <div className="label pt-4">Every XI</div>
+      <ul className="divide-y border-y text-xs">
+        {teams.map((t) => (
+          <li key={t.id} className="py-2">
+            <div className="flex justify-between gap-2">
+              <span className="font-semibold">{t.name}</span>
+              <span className="font-mono text-[10px] text-muted-foreground uppercase">{t.id === you ? "you" : t.bot ? "bot" : t.owner}{t.picked ? " · picked" : " · auto"}</span>
+            </div>
+            <div className="mt-0.5 text-muted-foreground">
+              {t.xi.map((id) => t.players.find((p) => p.id === id)?.name).join(", ")}
+              {t.impact && <> · <span className="text-foreground">sub {t.players.find((p) => p.id === t.impact)?.name}</span></>}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -127,8 +132,7 @@ function XiEditor({ code, team, token }: { code: string; team: SetupTeam; token:
   const bowling = xi.filter((id) => ["BOWL", "AR"].includes(byId[id]?.role)).length + (impact && ["BOWL", "AR"].includes(byId[impact]?.role) ? 1 : 0);
   const keeper = xi.some((id) => byId[id]?.role === "WK");
   const squadHasKeeper = team.players.some((p) => p.role === "WK");
-  const bowlersAvailable = team.players.filter((p) => ["BOWL", "AR"].includes(p.role)).length;
-  const bowlingNeeded = Math.min(5, bowlersAvailable);
+  const bowlingNeeded = Math.min(5, team.players.filter((p) => ["BOWL", "AR"].includes(p.role)).length);
   const short = team.players.length < 11;
 
   const move = (i: number, d: number) => setXi((x) => { const y = [...x]; [y[i], y[i + d]] = [y[i + d], y[i]]; return y; });
@@ -148,7 +152,7 @@ function XiEditor({ code, team, token }: { code: string; team: SetupTeam; token:
     <section className="space-y-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="label">{team.name} · batting order</div>
-        <div className="flex gap-3 font-mono text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap gap-3 font-mono text-[11px] text-muted-foreground">
           <span className={cn(xi.length !== 11 && "text-destructive")}>{xi.length}/11</span>
           <span className={cn(os > 4 && "text-destructive")}>{os}/4 overseas</span>
           <span className={cn(!keeper && squadHasKeeper && "text-destructive")}>{keeper ? "keeper ✓" : squadHasKeeper ? "no keeper" : "no keeper in squad: a batter keeps"}</span>
@@ -195,7 +199,7 @@ function XiEditor({ code, team, token }: { code: string; team: SetupTeam; token:
           {state.kind === "saving" ? "Saving…" : "Save my XI"}
         </Button>
         <Button variant="ghost" onClick={() => { setXi(team.xi); setImpact(team.impact); changed(); }}>Undo changes</Button>
-        {state.kind === "saved" && <span className="text-sm text-signal">Saved.</span>}
+        {state.kind === "saved" && <span className="text-sm text-signal">Saved: used from your next match.</span>}
         {state.kind === "error" && <span className="text-sm text-destructive">{state.msg}</span>}
       </div>
     </section>
@@ -216,26 +220,47 @@ function PlayerName({ p }: { p: SeasonPlayer }) {
 
 // ---------------------------------------------------------------- the season
 
-function SeasonBoard({ code, season, you }: { code: string; season: Season; you: string | null }) {
-  const total = season.matches.length;
-  const [seen, setSeen] = useState(0);
-  useEffect(() => setSeen(loadProgress(code)), [code]);
-  const advance = (n: number) => { const v = Math.min(total, n); saveProgress(code, v); setSeen(v); };
+function SeasonBoard({ code, view, token, setView }: { code: string; view: SeasonView; token: string | null; setView: (v: SeasonView) => void }) {
+  const router = useRouter();
+  const season = view.season as Season;
+  const you = view.you;
+  const total = view.total ?? season.matches.length;
+  const played = season.matches.length;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [seen, setSeen] = useState<number[]>([]);
+  useEffect(() => setSeen(watched(code)), [code, played]);
 
   const idOf = useMemo(() => Object.fromEntries(season.teams.map((t) => [t.name, t.id])), [season.teams]);
-  const youName = season.teams.find((t) => t.id === you)?.name ?? null;
-  const shown = season.matches.slice(0, seen);
-  const leagueCount = season.matches.filter((m) => m.stage === "League").length;
-  const table = pointsTable(shown, season.teams.map((t) => t.name));
-  const next = season.matches[seen];
-  const yourNext = youName ? season.matches.findIndex((m, i) => i >= seen && m.teams.includes(youName)) : -1;
-  const done = seen >= total;
+  const nameOf = useMemo(() => Object.fromEntries(season.teams.map((t) => [t.id, t.name])), [season.teams]);
+  const youName = you ? nameOf[you] : null;
+  const next = view.next;
+  const nextIsMine = !!(next && you && (next.home === you || next.away === you));
+  const mineTeam = view.teams.find((t) => t.id === you);
+  // Your most recent match, if it's the latest result and you haven't watched it.
+  const fresh = youName ? [...season.matches].reverse().find((m) => m.teams.includes(youName)) : undefined;
+  const unwatched = fresh && !seen.includes(fresh.match) && fresh.match === played ? fresh : undefined;
+
+  async function step(how: "next" | "mine" | "end", thenWatch = false) {
+    setBusy(true);
+    setError(null);
+    try {
+      const v = await seasonApi.advance(code, token, how);
+      setView(v);
+      if (thenWatch) router.push(`/auction/${code}/season/match/${v.season!.matches.length}?live=1`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't move the season on.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-10">
       <div>
-        <div className="label mb-2">Room {code} · {season.format} · match {Math.min(seen, total)} of {total}</div>
-        {done ? (
+        <div className="label mb-2">Room {code} · {season.format} · {played} of {total} played</div>
+        {season.champion ? (
           <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">
             <TrophyIcon weight="fill" className="mr-2 inline text-signal" />
             <span className={cn(season.champion.id === you && "text-signal")}>{season.champion.name}</span> win the title
@@ -244,37 +269,56 @@ function SeasonBoard({ code, season, you }: { code: string; season: Season; you:
           <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">The season</h1>
         )}
         <div className="seam mt-5" aria-hidden />
-        {done && <p className="mt-4 text-muted-foreground">They beat {season.runner_up.name} in the final.{season.champion.id === you ? " That's your franchise." : ""}</p>}
+        {season.champion && season.runner_up && (
+          <p className="mt-4 text-muted-foreground">They beat {season.runner_up.name} in the final.{season.champion.id === you ? " That's your franchise." : ""}</p>
+        )}
       </div>
 
-      {!done && next && (
+      {unwatched && (
+        <div className="flex flex-wrap items-center gap-3 border border-signal/50 bg-signal/5 px-4 py-3">
+          <span className="flex-1 text-sm">Your match against <b>{idOf[unwatched.teams.find((t) => t !== youName)!]}</b> has been played.</span>
+          <Button asChild className="font-mono uppercase"><Link href={`/auction/${code}/season/match/${unwatched.match}?live=1`}><PlayIcon weight="fill" />Watch it live</Link></Button>
+        </div>
+      )}
+
+      {next && (
         <div className="flex flex-wrap items-center gap-3 border-l-2 border-signal pl-4">
           <div className="min-w-0 flex-1">
-            <div className="label">Next · match {seen + 1}{next.stage !== "League" ? ` · ${next.stage}` : ""}</div>
-            <div className="font-display text-2xl font-bold uppercase">{idOf[next.teams[0]]} <span className="text-muted-foreground">v</span> {idOf[next.teams[1]]}</div>
+            <div className="label">Next · match {next.match}{next.stage !== "League" ? ` · ${next.stage}` : ""}</div>
+            <div className="font-display text-2xl font-bold uppercase">{next.home} <span className="text-muted-foreground">v</span> {next.away}</div>
           </div>
-          {youName && next.teams.includes(youName) ? (
+          {view.host ? (
             <>
-              <Button asChild size="lg" className="font-mono uppercase">
-                <Link href={`/auction/${code}/season/match/${seen + 1}?live=1`}><PlayIcon weight="fill" />Watch live</Link>
-              </Button>
-              <Button variant="outline" size="lg" onClick={() => advance(seen + 1)} className="font-mono uppercase">Result</Button>
+              {nextIsMine ? (
+                <Button size="lg" disabled={busy} onClick={() => step("next", true)} className="font-mono uppercase"><PlayIcon weight="fill" />Play my match</Button>
+              ) : (
+                <Button size="lg" disabled={busy} onClick={() => step("next")} className="font-mono uppercase"><FastForwardIcon />Next match</Button>
+              )}
+              {you && !nextIsMine && (
+                <Button variant="outline" size="lg" disabled={busy} onClick={() => step("mine")} className="font-mono uppercase">To my next match</Button>
+              )}
+              <Button variant="ghost" disabled={busy} onClick={() => step("end")}><SkipForwardIcon />{busy ? "Playing…" : "Skip to the end"}</Button>
             </>
           ) : (
-            <>
-              <Button size="lg" onClick={() => advance(seen + 1)} className="font-mono uppercase"><FastForwardIcon />Next result</Button>
-              {yourNext > seen && (
-                <Button variant="outline" size="lg" onClick={() => advance(yourNext)} className="font-mono uppercase">To your next match</Button>
-              )}
-            </>
+            <span className="text-sm text-muted-foreground">The host moves the season on. This page follows along.</span>
           )}
-          <Button variant="ghost" onClick={() => advance(total)}><SkipForwardIcon />Skip to the end</Button>
+          {error && <span className="basis-full text-sm text-destructive">{error}</span>}
         </div>
+      )}
+
+      {mineTeam && !season.champion && token && (
+        <section className="border">
+          <button type="button" onClick={() => setEditing((e) => !e)} className="flex w-full items-center justify-between px-4 py-3 text-left">
+            <span><span className="label">Your XI</span><span className="ml-3 text-sm text-muted-foreground">change it before {nextIsMine ? "this match" : "your next match"}</span></span>
+            <CaretDownIcon className={cn("transition-transform", editing && "rotate-180")} />
+          </button>
+          {editing && <div className="border-t p-4"><XiEditor code={code} team={mineTeam} token={token} /></div>}
+        </section>
       )}
 
       <div className="grid gap-10 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <section className="space-y-2">
-          <div className="label">Points table{seen < leagueCount ? ` · after ${shown.filter((m) => m.stage === "League").length} of ${leagueCount} league matches` : ""}</div>
+          <div className="label">Points table</div>
           <table className="w-full text-sm">
             <thead>
               <tr className="font-mono text-[10px] text-muted-foreground uppercase">
@@ -282,7 +326,7 @@ function SeasonBoard({ code, season, you }: { code: string; season: Season; you:
               </tr>
             </thead>
             <tbody className="divide-y border-y font-mono tnum">
-              {table.map((r, i) => (
+              {season.table.map((r, i) => (
                 <tr key={r.team} className={cn(idOf[r.team] === you && "bg-signal/10", i === 3 && "border-b-2 border-b-signal/60")}>
                   <td className="py-1.5 text-muted-foreground">{i + 1}</td>
                   <td className="font-sans">{r.team}{idOf[r.team] === you && <span className="ml-1 font-mono text-[10px] text-signal">YOU</span>}</td>
@@ -299,14 +343,14 @@ function SeasonBoard({ code, season, you }: { code: string; season: Season; you:
         <section className="space-y-2">
           <div className="label">Results</div>
           <ol className="max-h-[32rem] divide-y overflow-y-auto border-y">
-            {shown.length === 0 && <li className="py-3 text-sm text-muted-foreground">No matches yet.</li>}
-            {[...shown].reverse().map((m) => <ResultRow key={m.match} code={code} m={m} idOf={idOf} youName={youName} />)}
+            {played === 0 && <li className="py-3 text-sm text-muted-foreground">No matches yet.</li>}
+            {[...season.matches].reverse().map((m) => <ResultRow key={m.match} code={code} m={m} idOf={idOf} youName={youName} />)}
           </ol>
         </section>
       </div>
 
-      {done && <Caps season={season} idOf={idOf} />}
-      <YourXi season={season} you={you} />
+      {season.champion && <Caps season={season} idOf={idOf} />}
+      {!season.champion && <EveryXi teams={view.teams} you={you} />}
     </div>
   );
 }
@@ -319,9 +363,7 @@ function ResultRow({ code, m, idOf, youName }: { code: string; m: MatchSummary; 
       <Link href={`/auction/${code}/season/match/${m.match}`} className={cn("flex items-center gap-3 px-1 py-2 text-xs hover:bg-muted", mine && "bg-signal/5")}>
         <span className="w-14 shrink-0 font-mono text-[10px] text-muted-foreground">{m.stage === "League" ? `#${m.match}` : m.stage}</span>
         <span className="min-w-0 flex-1">
-          <span className="font-mono tnum">
-            {m.scores.map((s) => `${idOf[s.team]} ${s.runs}/${s.wickets}`).join(" · ")}
-          </span>
+          <span className="font-mono tnum">{m.scores.map((s) => `${idOf[s.team]} ${s.runs}/${s.wickets}`).join(" · ")}</span>
           <span className="block truncate text-muted-foreground">{m.winner ? `${idOf[m.winner]} ${m.margin}` : m.margin || "Tied"}</span>
         </span>
         {mine && <Badge variant={won ? "default" : "outline"} className="font-mono text-[9px]">{won ? "WON" : m.winner ? "LOST" : "TIED"}</Badge>}
@@ -349,16 +391,5 @@ function Caps({ season, idOf }: { season: Season; idOf: Record<string, string> }
       {list("Orange Cap · most runs", season.caps.orange, (r) => `${r.runs} (${r.balls})`)}
       {list("Purple Cap · most wickets", season.caps.purple, (r) => `${r.wickets} wkts`)}
     </div>
-  );
-}
-
-function YourXi({ season, you }: { season: Season; you: string | null }) {
-  if (!you) return null;
-  const l = season.lineups[you];
-  if (!l) return null;
-  return (
-    <p className="font-mono text-[11px] text-muted-foreground">
-      Your XI ({l.picked ? "your pick" : "engine's pick"}): batting order as named on the scorecards; Impact sub {l.impact ? "set" : "none"}.
-    </p>
   );
 }

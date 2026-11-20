@@ -137,18 +137,34 @@ def test_season_end_to_end():
 
         A = "/api/v1/rooms/SEASNA/season"
         s = client.get(A, params={"token": guest.token}).json()
-        assert s["you"] == guest.id and not s["host"] and not s["played"] and len(s["teams"]) == 4
+        assert s["you"] == guest.id and not s["host"] and not s["started"] and len(s["teams"]) == 4
         mine = next(t for t in s["teams"] if t["id"] == guest.id)
         bad = client.put(f"{A}/lineup", json={"token": guest.token, "xi": mine["xi"][:10] + [mine["xi"][0]]})
         assert bad.status_code == 422
         new_xi = mine["xi"][1:] + mine["xi"][:1]                 # same players, different order
         assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": new_xi, "impact": mine["impact"]}).status_code == 200
         assert client.put(f"{A}/lineup", json={"token": "nope", "xi": new_xi}).status_code == 403
-        assert client.post(f"{A}/play", json={"token": guest.token}).status_code == 403   # host only
-        played = client.post(f"{A}/play", json={"token": r.host_token}).json()["season"]
-        assert len(played["matches"]) == 12 + 4 and played["lineups"][guest.id]["xi"] == new_xi
-        assert played["lineups"][guest.id]["picked"] and played["champion"]["id"] in {t["id"] for t in s["teams"]}
+        assert client.post(f"{A}/start", json={"token": guest.token}).status_code == 403    # host only
+        host = r.host_token
+        s = client.post(f"{A}/start", json={"token": host}).json()
+        assert s["started"] and s["season"]["matches"] == [] and s["total"] == 12 + 4
+        assert client.post(f"{A}/advance", json={"token": guest.token}).status_code == 403
+        s = client.post(f"{A}/advance", json={"token": host, "how": "next"}).json()
+        assert len(s["season"]["matches"]) == 1
+        # Change the guest's XI mid-season: their next match uses it.
+        changed = new_xi[::-1]
+        assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed, "impact": mine["impact"]}).status_code == 200
+        before = len(s["season"]["matches"])
+        while True:
+            s = client.post(f"{A}/advance", json={"token": host, "how": "next"}).json()
+            last = s["season"]["matches"][-1]
+            if guest.id in last["lineups"]:
+                break
+        assert last["match"] > before and last["lineups"][guest.id]["xi"] == changed
+        s = client.post(f"{A}/advance", json={"token": host, "how": "end"}).json()
+        assert s["finished"] and len(s["season"]["matches"]) == 16 and s["season"]["champion"]
+        assert {m["stage"] for m in s["season"]["matches"][-4:]} == {"Qualifier 1", "Eliminator", "Qualifier 2", "Final"}
+        assert s["season"]["caps"]["orange"] and s["season"]["caps"]["purple"]
+        assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed}).status_code == 422   # over
         m = client.get(f"{A}/match/1").json()
         assert m["innings"] and m["commentary"]
-        again = client.get(A).json()
-        assert again["played"] and again["season"]["champion"] == played["champion"]

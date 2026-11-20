@@ -12,7 +12,7 @@ from ..sim.profiles import from_phase_rows
 from ..sim.rates import load_env
 from ..xi import service as xi
 from . import lineup
-from .run import play
+from . import run
 
 FORMAT = "IPL"
 
@@ -30,6 +30,11 @@ def load_room(conn, code: str) -> dict:
     if season is None:
         conn.execute("INSERT INTO seasons (code) VALUES (%s) ON CONFLICT DO NOTHING", (row["code"],))
         season = {"lineups": {}, "result": None}
+    elif season["result"] and "fixtures" not in season["result"]:
+        # A season saved by the first, all-at-once version: start it again.
+        conn.execute("UPDATE seasons SET result = NULL WHERE code = %s", (row["code"],))
+        conn.execute("DELETE FROM sim_results WHERE context = 'season' AND ref = %s", (row["code"],))
+        season = {**season, "result": None}
     return {**row, "lineups": season["lineups"] or {}, "season": season["result"]}
 
 
@@ -93,8 +98,10 @@ def lineup_for(team: dict, saved: dict | None) -> tuple[list[str], str | None, b
 
 
 def save_lineup(conn, room: dict, fid: str, xi_ids: list[str], impact: str | None) -> None:
-    if room["season"]:
-        raise SeasonError("This season has already been played.")
+    """Set a franchise's XI for its coming matches (before or during the season)."""
+    state = room["season"]
+    if state and state.get("champion"):
+        raise SeasonError("The season is over.")
     team = squads(conn, room)[fid]
     if len(team["players"]) < 11:
         raise SeasonError("Your squad has fewer than eleven players: the engine picks for you.")
@@ -104,6 +111,7 @@ def save_lineup(conn, room: dict, fid: str, xi_ids: list[str], impact: str | Non
         raise SeasonError(str(e)) from e
     conn.execute("UPDATE seasons SET lineups = lineups || %s WHERE code = %s",
                  (Jsonb({fid: {"xi": xi_ids, "impact": impact}}), room["code"]))
+    room["lineups"][fid] = {"xi": xi_ids, "impact": impact}
 
 
 def _team(fid: str, team: dict, xi_ids: list[str], impact: str | None, env) -> Team:
@@ -118,22 +126,67 @@ def _team(fid: str, team: dict, xi_ids: list[str], impact: str | None, env) -> T
     return Team(team["name"], profs, keeper=keeper, impact=[team["profiles"][impact]] if impact else [])
 
 
-def play_season(conn, room: dict) -> dict:
+def start_season(conn, room: dict) -> dict:
+    """Draw the fixtures; nothing is played until the season is moved on."""
     if room["season"]:
         return room["season"]
+    names = {f["id"]: f["name"] for f in room["result"]["franchises"]}
+    state = run.start(names, zlib.crc32(room["code"].encode()))
+    conn.execute("UPDATE seasons SET result = %s WHERE code = %s", (Jsonb(state), room["code"]))
+    room["season"] = state
+    return state
+
+
+ADVANCE = ("next", "mine", "end")
+
+
+def advance(conn, room: dict, how: str, you: str | None) -> dict:
+    """Play on: ``next`` (one match), ``mine`` (every match before your team's next
+    one, so it's up next: change your XI, then play it), or ``end``. Each match
+    uses the XIs set at the moment it's played."""
+    state = room["season"]
+    if not state:
+        raise SeasonError("The season hasn't started.")
+    if how not in ADVANCE:
+        raise SeasonError("Unknown step.")
     env = load_env(xi.FORMATS[FORMAT].env)
     sq = squads(conn, room)
-    teams, lineups = {}, {}
+    teams, used = {}, {}
     for fid, team in sq.items():
         xi_ids, impact, picked = lineup_for(team, room["lineups"].get(fid))
         teams[fid] = _team(fid, team, xi_ids, impact, env)
-        lineups[fid] = {"xi": xi_ids, "impact": impact, "picked": picked}
-    seed = zlib.crc32(room["code"].encode())
-    result, full = play(teams, env, seed)
-    result["lineups"] = lineups
-    result["format"] = "IPL (two groups, 14 matches each)" if len(teams) == 10 else "Double round robin"
-    for i, m in enumerate(full, start=1):
+        used[fid] = {"xi": xi_ids, "impact": impact, "picked": picked}
+    played = 0
+    while True:
+        fx = run.next_fixture(state)
+        if fx is None:
+            break
+        if how == "mine" and you in (fx["home"], fx["away"]):
+            break                                  # your match is next
+        full = run.play_next(state, teams, used, env)
+        played += 1
         conn.execute("INSERT INTO sim_results (context, ref, match_no, match_json) VALUES ('season', %s, %s, %s) "
-                     "ON CONFLICT (context, ref, match_no) DO NOTHING", (room["code"], i, Jsonb(m)))
-    conn.execute("UPDATE seasons SET result = %s, played_at = now() WHERE code = %s", (Jsonb(result), room["code"]))
-    return result
+                     "ON CONFLICT (context, ref, match_no) DO UPDATE SET match_json = EXCLUDED.match_json",
+                     (room["code"], len(state["matches"]), Jsonb(full)))
+        if how == "next" or (how == "mine" and you is None):
+            break
+    conn.execute("UPDATE seasons SET result = %s, played_at = CASE WHEN %s THEN now() ELSE played_at END "
+                 "WHERE code = %s", (Jsonb(state), bool(state["champion"]), room["code"]))
+    return state
+
+
+def view(conn, room: dict, token: str | None) -> dict:
+    """Everything the season page needs: each team's squad and current XI (so XIs
+    can change mid-season), and the season so far."""
+    you = seat_of(room, token)
+    teams = []
+    for fid, team in squads(conn, room).items():
+        xi_ids, impact, picked = lineup_for(team, room["lineups"].get(fid))
+        teams.append({"id": fid, "name": team["name"], "bot": team["bot"], "owner": team["owner"],
+                      "players": list(team["players"].values()), "xi": xi_ids, "impact": impact, "picked": picked})
+    state = room["season"]
+    nxt = run.next_fixture(state) if state else None
+    return {"code": room["code"], "mode": room["mode"], "you": you, "host": is_host(room, token),
+            "next": nxt and {**nxt, "match": len(state["matches"]) + 1},
+            "started": state is not None, "finished": bool(state and state["champion"]),
+            "total": run.total_matches(state) if state else None, "teams": teams, "season": state}

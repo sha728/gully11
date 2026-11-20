@@ -8,14 +8,20 @@ After an auction, every franchise's squad plays an IPL season on the match engin
 2. **Setup:** each person who ran a franchise sets their XI (batting order) and an
    Impact sub, starting from the engine's pick; bots use the engine's pick. Seats are
    recognised by the token from the auction (stored as a sha256 hash in
-   `auction_rooms.seats`). The host starts the season; auctions saved before seats
-   were kept can be started by anyone.
-3. **Play:** the whole season is simulated at once (74 matches for ten teams, about
-   five seconds) and saved: `seasons.result` plus every full match in `sim_results`
-   (`context = 'season'`).
-4. **Reveal:** each viewer goes through it match by match; the points table is built
-   from the matches they have seen (progress kept in their browser). Their own
-   matches can be watched live, ball by ball, with the result hidden until the end.
+   `auction_rooms.seats`). The host starts the season (draws the fixtures); auctions
+   saved before seats were kept can be started by anyone.
+3. **One shared timeline, moved on by the host:** *Next match*, *To my next match*
+   (plays everything before the host's next match, so it's up next) or *Skip to the
+   end*. A match is simulated only when the season reaches it, with the XIs set at
+   that moment, so anyone can change their XI between matches; each result records
+   the XIs used. Everyone else's page follows along (polls every few seconds).
+4. **Watching:** the host's *Play my match* opens it live, ball by ball, with the result
+   hidden until the end; anyone whose match has just been played gets *Watch it live*.
+   Any played match can be replayed from the results list.
+
+State: `seasons.result` holds the fixtures, results, playoff outcomes and running
+cap tallies (plain JSON, updated each step); full matches are in `sim_results`
+(`context = 'season'`).
 
 ## Rules
 

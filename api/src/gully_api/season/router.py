@@ -19,8 +19,9 @@ class Lineup(BaseModel):
     impact: str | None = None
 
 
-class Play(BaseModel):
+class Step(BaseModel):
     token: str | None = None
+    how: str = "next"            # next | mine | end
 
 
 def _room(conn, code: str) -> dict:
@@ -32,25 +33,17 @@ def _room(conn, code: str) -> dict:
 
 @router.get("")
 def season(code: str, token: str | None = None, conn=Depends(get_conn)) -> dict[str, Any]:
-    """Before it's played: every squad with its current XI (picked by a person or
-    the engine). Afterwards: the whole season. ``you`` is the caller's franchise."""
+    """Every squad with its current XI, and the season so far. ``you`` is the
+    caller's franchise; ``host`` whether they move the season on."""
     room = _room(conn, code)
+    out = S.view(conn, room, token)
     conn.commit()
-    you = S.seat_of(room, token)
-    out: dict[str, Any] = {"code": room["code"], "mode": room["mode"], "you": you,
-                           "host": S.is_host(room, token), "played": room["season"] is not None}
-    if room["season"]:
-        return {**out, "season": room["season"]}
-    teams = []
-    for fid, team in S.squads(conn, room).items():
-        xi_ids, impact, picked = S.lineup_for(team, room["lineups"].get(fid))
-        teams.append({"id": fid, "name": team["name"], "bot": team["bot"], "owner": team["owner"],
-                      "players": list(team["players"].values()), "xi": xi_ids, "impact": impact, "picked": picked})
-    return {**out, "teams": teams}
+    return out
 
 
 @router.put("/lineup")
 def set_lineup(code: str, req: Lineup, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Your XI for your coming matches: before the season or between matches."""
     room = _room(conn, code)
     fid = S.seat_of(room, req.token)
     if fid is None:
@@ -63,15 +56,32 @@ def set_lineup(code: str, req: Lineup, conn=Depends(get_conn)) -> dict[str, Any]
     return {"ok": True, "franchise": fid}
 
 
-@router.post("/play")
-def play(code: str, req: Play, conn=Depends(get_conn)) -> dict[str, Any]:
-    """Simulate the whole season (about five seconds for ten teams) and save it."""
+@router.post("/start")
+def start(code: str, req: Step, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Draw the fixtures (host)."""
     room = _room(conn, code)
     if not room["season"] and not S.is_host(room, req.token):
         raise HTTPException(403, "Only the host can start the season.")
-    result = S.play_season(conn, room)
+    S.start_season(conn, room)
     conn.commit()
-    return {"played": True, "season": result}
+    return S.view(conn, room, req.token)
+
+
+@router.post("/advance")
+def advance(code: str, req: Step, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Move the season on (host): ``next`` match, to the host's next match
+    (``mine``), or to the ``end``. Matches are simulated now, with today's XIs."""
+    room = _room(conn, code)
+    if not S.is_host(room, req.token):
+        raise HTTPException(403, "Only the host moves the season on.")
+    conn.execute("SELECT 1 FROM seasons WHERE code = %s FOR UPDATE", (room["code"],))   # one step at a time
+    room = _room(conn, code)
+    try:
+        S.advance(conn, room, req.how, S.seat_of(room, req.token))
+    except S.SeasonError as e:
+        raise HTTPException(422, str(e)) from e
+    conn.commit()
+    return S.view(conn, room, req.token)
 
 
 @router.get("/match/{n}")

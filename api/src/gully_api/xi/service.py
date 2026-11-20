@@ -426,6 +426,12 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
     }
 
 
+def run_difference(matches: list[dict], mine: str = "Your XI") -> int:
+    """Runs scored minus runs conceded over a series (match summaries), the
+    leaderboard's tiebreak after points."""
+    return sum(s["runs"] if s["team"] == mine else -s["runs"] for m in matches for s in m["scores"])
+
+
 def _summary(m, n: int) -> dict:
     d = m.to_dict()
     top = max((b for inn in d["innings"] for b in inn["batting_card"]), key=lambda b: b["runs"])

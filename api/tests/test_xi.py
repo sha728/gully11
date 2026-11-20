@@ -172,3 +172,32 @@ def test_captain_choice_leads_the_series(client):
     assert them["id"] and them["rating"] > 0                 # the Greats are led by a real captain
     m = client.get(f"{X}/challenge/{slug}/match/1").json()
     assert m["toss"]["winner"] in m["teams"] and m["toss"]["decision"] in ("bat", "bowl")
+
+
+def test_daily_leaderboard(client):
+    d = fill(client, draft(client, format="ODI", daily=True))
+    r = client.post(f"{X}/drafts/{d['id']}/play")
+    assert r.status_code == 200, r.text
+    slug = r.json()["slug"]
+    board = client.get(f"{X}/leaderboard/ODI", params={"draft": d["id"]}).json()
+    assert board["day"] == d["daily"] == board["today"] and board["total"] >= 1
+    you = board["you"]
+    assert you and you["slug"] == slug and you["you"] and you["name"] is None
+    assert you["points"] == 2 * you["won"] + you["tied"] + you["drawn"]
+    ranks = [row["rank"] for row in board["rows"]]
+    assert ranks == sorted(ranks) and ranks[0] == 1
+    assert all("draft_id" not in row for row in board["rows"])   # the draft id is a secret
+    # Playing again doesn't add a second entry.
+    client.post(f"{X}/drafts/{d['id']}/play")
+    assert client.get(f"{X}/leaderboard/ODI").json()["total"] == board["total"]
+    # Naming: allowed characters only; only for real entries.
+    put = lambda name, did=d["id"]: client.put(f"{X}/leaderboard/entries/{did}/name", json={"name": name})
+    assert put("x").status_code == 422 and put("<script>").status_code == 422
+    assert put("Gully Boy", "nope").status_code == 404
+    assert put("  Gully   Boy ").json()["name"] == "Gully Boy"
+    assert client.get(f"{X}/leaderboard/ODI", params={"draft": d["id"]}).json()["you"]["name"] == "Gully Boy"
+    # Another day, or a non-daily series: not on today's board.
+    assert client.get(f"{X}/leaderboard/ODI", params={"day": "2001-01-01"}).json()["rows"] == []
+    plain = fill(client, draft(client, format="ODI", seed=777))
+    client.post(f"{X}/drafts/{plain['id']}/play")
+    assert client.get(f"{X}/leaderboard/ODI", params={"draft": plain["id"]}).json()["you"] is None

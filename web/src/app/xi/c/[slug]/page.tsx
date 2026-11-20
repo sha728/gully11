@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Scoreboard, Section } from "@/components/blocks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DailyRank } from "@/components/xi/daily-rank";
 import { ShareBox } from "@/components/xi/share-box";
 import { fmt, NotFound, ROLE_LABEL } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -86,6 +87,8 @@ export default async function SeriesPage({ params, searchParams }: Props) {
         ...(r.tied ? [{ label: "Tied", value: String(r.tied) }] : []),
         { label: "Opponent", value: c.opponent.replace(/^All-time /, ""), hint: XI_COPY[c.format].title },
       ]} />
+
+      {c.daily && <DailyRank format={c.format} day={c.daily} slug={c.slug} />}
 
       <Section n={1} title="The series" aside={<Link href={`/xi/c/${c.slug}/match/1`} className="hover:text-foreground">watch it ball by ball →</Link>}>
         <div className="grid gap-px border bg-border sm:grid-cols-2 lg:grid-cols-5">

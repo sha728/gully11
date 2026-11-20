@@ -25,7 +25,8 @@ that skill and shrunk toward an ordinary player on small samples, plus IPL and T
 experience. Fair price = value rank on a curve from ₹15 cr, calibrated so a full set
 of 21-man squads is worth about 92% of the room's money. Pool size scales with the
 number of franchises (25 per team + 20). Afghanistan's players (no Cricsheet
-country) are filled in by hand in `nationality.csv`.
+country) now get one from the pipeline (Wikidata, see README "Nationality");
+`nationality.csv` still pins their country and capped status for the auction.
 
 This is a stats estimate, not trained on auction history; the planned price model
 replaces `values()` once a licensed price history exists.

@@ -42,8 +42,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "captains":
         from collections import Counter
-        from .captains import OUT, build
-        res = build()
+        from .captains import OUT, build as build_captains
+        res = build_captains()
         rows = res["rows"]
         print(f"{len(rows)} captain-format rows -> {OUT}")
         print("  per format:", dict(Counter(r["format"] for r in rows)))
@@ -56,8 +56,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "auction2026":
         from collections import Counter
-        from .auction_wiki import AUCTION_CSV, RETAINED_CSV, build
-        res = build()
+        from .auction_wiki import AUCTION_CSV, RETAINED_CSV, build as build_auction
+        res = build_auction()
         print(f"{len(res['retained'])} retained -> {RETAINED_CSV}")
         print(f"{len(res['sold'])} sold -> {AUCTION_CSV} (revision {res['revid']})")
         print("  per team retained:", dict(Counter(r["team"] for r in res["retained"])))

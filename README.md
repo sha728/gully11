@@ -30,7 +30,7 @@ uv run gully-pipeline build --dataset all        # -> data/gully.duckdb player t
 uv run gully-pipeline load                       # -> Postgres (drops + reloads player tables)
 uv run gully-pipeline spotcheck                  # recount 10 players from raw JSON, diff vs tables
 uv run gully-pipeline legends                    # rebuild reference/legends.csv (needs WIKIMEDIA_CONTACT)
-uv run gully-pipeline names                      # full names from Wikidata -> reference/ (needs WIKIMEDIA_CONTACT)
+uv run gully-pipeline names                      # full names + nationality from Wikidata -> reference/ (needs WIKIMEDIA_CONTACT)
 uv run gully-pipeline simbase                    # simulator base rates -> api/src/gully_api/sim/data/
 uv run gully-pipeline auction2026                 # IPL 2026 auction + retentions from Wikipedia (needs WIKIMEDIA_CONTACT)
 uv run pytest
@@ -47,6 +47,15 @@ cd ../web
 npm run dev                                      # http://localhost:3000: search, player, compare, venue pages
 npm run preview                                  # production build + server: much faster for just using the app
 ```
+
+**Nationality.** A player's country is the side they played internationals for in
+Cricsheet. Where there's none (uncapped players, and Afghanistan, which Cricsheet
+has no men's matches for), it falls back to, in order: hand-checked fixes in
+`pipeline/reference/nationality_fixes.csv`; Wikidata's country for sport, then
+citizenship, as a cricket team name (`gully-pipeline names`); and India for anyone
+who has played the Syed Mushtaq Ali Trophy. About 1,900 of 10,252 players, mostly
+lower-profile county and associate players, still have none.
+
 
 Dev mode compiles each page on first visit and doesn't cache, so it's slow to click
 around in; `npm run preview` serves pages in tens of milliseconds. The web app calls the

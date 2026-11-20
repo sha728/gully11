@@ -12,6 +12,10 @@ const display = Big_Shoulders({ subsets: ["latin"], weight: ["600", "700", "800"
 const sans = Instrument_Sans({ subsets: ["latin"], variable: "--font-instrument" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains" });
 
+// Hosted on free plans, the API sleeps when idle and takes about a minute to wake:
+// let server-rendered pages wait for it (60 s is Vercel Hobby's ceiling).
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: { default: "Gully11 — cricket, ball by ball", template: "%s — Gully11" },
   description:

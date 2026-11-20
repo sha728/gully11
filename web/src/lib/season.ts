@@ -39,7 +39,11 @@ export interface MatchSummary {
   lineups: Record<string, { xi: string[]; impact: string | null; picked: boolean }>;
 }
 
-export interface CapRow { id: string; name: string; team: string; runs?: number; balls?: number; wickets?: number }
+export interface CapRow {
+  id: string; name: string; team: string;
+  runs?: number; balls?: number; sr?: number | null;     // Orange Cap: runs, balls faced, strike rate
+  wickets?: number; econ?: number | null;                // Purple Cap: wickets, economy
+}
 
 export interface TableRow {
   team: string; played: number; won: number; lost: number; tied: number; points: number; nrr: number;

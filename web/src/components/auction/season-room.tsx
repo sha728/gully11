@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ROLE_LABEL } from "@/lib/api";
 import { loadSeat, money } from "@/lib/auction";
-import { seasonApi, watched, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
+import { seasonApi, watched, type CapRow, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
 import { cn } from "@/lib/utils";
 
 export function SeasonRoom({ code }: { code: string }) {
@@ -411,32 +411,49 @@ function ResultRow({ code, m, idOf, youName }: { code: string; m: MatchSummary; 
 }
 
 /** Orange and Purple Caps: the race while the season runs (top five so far),
- * the winners once it's over. Your players are marked. */
+ * the winners once it's over. Runs with strike rate; wickets with economy. Your
+ * players are marked. */
 function Caps({ season, idOf, youName }: { season: Season; idOf: Record<string, string>; youName: string | null }) {
   const over = !!season.champion;
-  const list = (title: string, color: string, rows: Season["caps"]["orange"], stat: (r: Season["caps"]["orange"][number]) => string) => (
+  const list = (title: string, color: string, rows: CapRow[], heads: [string, string], stats: (r: CapRow) => [string, string]) => (
     <section className="space-y-2">
       <div className="label"><CrownIcon weight="fill" className="mr-1 inline" style={{ color }} />{title}{over ? "" : " · so far"}</div>
-      <ol className="divide-y border-y text-sm">
-        {rows.length === 0 && <li className="py-2 text-muted-foreground">Nobody yet.</li>}
-        {rows.map((r, i) => (
-          <li key={r.id} className={cn("flex justify-between gap-2 py-1.5", r.team === youName && "bg-signal/5")}>
-            <span className="truncate">
-              <span className="mr-2 font-mono text-muted-foreground">{i + 1}</span>
-              {i === 0 && <CrownIcon weight="fill" className="mr-1 inline" style={{ color }} aria-label="holds the cap" />}
-              {r.name} <span className="font-mono text-[10px] text-muted-foreground">{idOf[r.team] ?? r.team}</span>
-              {r.team === youName && <span className="ml-1 font-mono text-[10px] text-signal">YOURS</span>}
-            </span>
-            <span className="font-mono font-semibold tnum">{stat(r)}</span>
-          </li>
-        ))}
-      </ol>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="font-mono text-[10px] text-muted-foreground uppercase">
+            <th className="w-6 py-1 text-left font-normal">#</th>
+            <th className="text-left font-normal">Player</th>
+            <th className="w-16 text-right font-normal">{heads[0]}</th>
+            <th className="w-16 text-right font-normal">{heads[1]}</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y border-y">
+          {rows.length === 0 && <tr><td colSpan={4} className="py-2 text-muted-foreground">Nobody yet.</td></tr>}
+          {rows.map((r, i) => {
+            const [a, b] = stats(r);
+            return (
+              <tr key={r.id} className={cn(r.team === youName && "bg-signal/5")}>
+                <td className="py-1.5 font-mono text-muted-foreground">{i + 1}</td>
+                <td className="max-w-0 truncate">
+                  {i === 0 && <CrownIcon weight="fill" className="mr-1 inline" style={{ color }} aria-label="holds the cap" />}
+                  {r.name} <span className="font-mono text-[10px] text-muted-foreground">{idOf[r.team] ?? r.team}</span>
+                  {r.team === youName && <span className="ml-1 font-mono text-[10px] text-signal">YOURS</span>}
+                </td>
+                <td className="text-right font-mono font-semibold tnum">{a}</td>
+                <td className="text-right font-mono text-muted-foreground tnum">{b}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </section>
   );
   return (
     <div className="grid gap-10 md:grid-cols-2">
-      {list("Orange Cap · most runs", "oklch(0.75 0.17 60)", season.caps.orange, (r) => `${r.runs} (${r.balls})`)}
-      {list("Purple Cap · most wickets", "oklch(0.6 0.2 300)", season.caps.purple, (r) => `${r.wickets} wkts`)}
+      {list("Orange Cap · most runs", "oklch(0.75 0.17 60)", season.caps.orange, ["Runs", "SR"],
+        (r) => [String(r.runs ?? 0), r.sr != null ? r.sr.toFixed(1) : "–"])}
+      {list("Purple Cap · most wickets", "oklch(0.6 0.2 300)", season.caps.purple, ["Wkts", "Econ"],
+        (r) => [String(r.wickets ?? 0), r.econ != null ? r.econ.toFixed(2) : "–"])}
     </div>
   );
 }

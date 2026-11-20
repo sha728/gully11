@@ -118,10 +118,31 @@ def next_fixture(state: dict) -> dict | None:
     return None
 
 
+def add_to_tally(state: dict, full: dict) -> None:
+    """Add one match's batting and bowling to the running cap tallies."""
+    for inn in full["innings"]:
+        for bt in inn["batting_card"]:
+            if bt["how_out"]:
+                r = state["tally"]["runs"].setdefault(bt["id"], {"name": bt["name"], "team": inn["batting"], "runs": 0, "balls": 0})
+                r["runs"] += bt["runs"]
+                r["balls"] += bt["balls"]
+        for bw in inn["bowling_card"]:
+            w = state["tally"]["wickets"].setdefault(bw["id"], {"name": bw["name"], "team": inn["bowling"], "wickets": 0, "runs": 0, "balls": 0})
+            w["wickets"] += bw["wickets"]
+            w["runs"] += bw["runs"]
+            w["balls"] = w.get("balls", 0) + _balls(bw["overs"])
+
+
+def refresh_caps(state: dict) -> None:
+    state["caps"] = _caps(state)
+
+
 def _caps(state: dict) -> dict:
     t = state["tally"]
-    orange = sorted(({"id": k, **v} for k, v in t["runs"].items()), key=lambda r: (-r["runs"], r["balls"]))[:5]
-    purple = sorted(({"id": k, **v} for k, v in t["wickets"].items()), key=lambda r: (-r["wickets"], r["runs"]))[:5]
+    orange = sorted(({"id": k, **v, "sr": round(100 * v["runs"] / v["balls"], 1) if v["balls"] else None}
+                     for k, v in t["runs"].items()), key=lambda r: (-r["runs"], r["balls"]))[:5]
+    purple = sorted(({"id": k, **v, "econ": round(6 * v["runs"] / v["balls"], 2) if v.get("balls") else None}
+                     for k, v in t["wickets"].items()), key=lambda r: (-r["wickets"], r["runs"]))[:5]
     return {"orange": orange, "purple": purple}
 
 
@@ -138,16 +159,7 @@ def play_next(state: dict, teams: dict[str, Team], lineups: dict[str, dict], env
     s = _summary(n, fx["stage"], m, {a: lineups[a], b: lineups[b]})
     state["matches"].append(s)
     name = {t["id"]: t["name"] for t in state["teams"]}
-    for inn in full["innings"]:
-        for bt in inn["batting_card"]:
-            if bt["how_out"]:
-                r = state["tally"]["runs"].setdefault(bt["id"], {"name": bt["name"], "team": inn["batting"], "runs": 0, "balls": 0})
-                r["runs"] += bt["runs"]
-                r["balls"] += bt["balls"]
-        for bw in inn["bowling_card"]:
-            w = state["tally"]["wickets"].setdefault(bw["id"], {"name": bw["name"], "team": inn["bowling"], "wickets": 0, "runs": 0})
-            w["wickets"] += bw["wickets"]
-            w["runs"] += bw["runs"]
+    add_to_tally(state, full)
     if fx["stage"] == "League":
         state["table"] = table(state["matches"], [t["name"] for t in state["teams"]])
     else:

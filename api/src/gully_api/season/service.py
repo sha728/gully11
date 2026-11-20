@@ -35,7 +35,16 @@ def load_room(conn, code: str) -> dict:
         conn.execute("UPDATE seasons SET result = NULL WHERE code = %s", (row["code"],))
         conn.execute("DELETE FROM sim_results WHERE context = 'season' AND ref = %s", (row["code"],))
         season = {**season, "result": None}
-    return {**row, "lineups": season["lineups"] or {}, "season": season["result"]}
+    state = season["result"]
+    if state and any("balls" not in w for w in state["tally"]["wickets"].values()):
+        # Tallies from before balls bowled were counted: rebuild them from the matches.
+        state["tally"] = {"runs": {}, "wickets": {}}
+        for r in conn.execute("SELECT match_json FROM sim_results WHERE context = 'season' AND ref = %s "
+                              "ORDER BY match_no", (row["code"],)).fetchall():
+            run.add_to_tally(state, r["match_json"])
+        run.refresh_caps(state)
+        conn.execute("UPDATE seasons SET result = %s WHERE code = %s", (Jsonb(state), row["code"]))
+    return {**row, "lineups": season["lineups"] or {}, "season": state}
 
 
 def seat_of(room: dict, token: str | None) -> str | None:

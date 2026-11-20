@@ -164,7 +164,11 @@ def test_season_end_to_end():
         s = client.post(f"{A}/advance", json={"token": host, "how": "end"}).json()
         assert s["finished"] and len(s["season"]["matches"]) == 16 and s["season"]["champion"]
         assert {m["stage"] for m in s["season"]["matches"][-4:]} == {"Qualifier 1", "Eliminator", "Qualifier 2", "Final"}
-        assert s["season"]["caps"]["orange"] and s["season"]["caps"]["purple"]
+        orange, purple = s["season"]["caps"]["orange"], s["season"]["caps"]["purple"]
+        assert orange and purple
+        top = orange[0]
+        assert top["sr"] == round(100 * top["runs"] / top["balls"], 1)
+        assert all(w["econ"] and 2 < w["econ"] < 20 and w["balls"] > 0 for w in purple)
         assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed}).status_code == 422   # over
         m = client.get(f"{A}/match/1").json()
         assert m["innings"] and m["commentary"]

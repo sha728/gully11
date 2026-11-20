@@ -464,7 +464,7 @@ function LatestResults({ code, matches, rows, idOf, youName }: {
                   </Link>
                 </td>
                 <td className="text-right">
-                  {m.winner ? `${idOf[m.winner]} won` : "Tied"}
+                  {m.winner ? `${idOf[m.winner]} won${m.result === "super over" ? " (SO)" : ""}` : "Tied"}
                   {outcome && <span className={cn("ml-1.5 inline-block w-4 text-center text-[10px] font-bold", outcome === "W" ? "bg-signal text-signal-foreground" : "border")}>{outcome}</span>}
                 </td>
               </tr>

@@ -5,10 +5,11 @@ results so far, playoff outcomes and running cap tallies. ``play_next`` simulate
 the next fixture with whatever XIs the teams field *at that moment*, so a team
 can change its XI between matches. Results don't exist until they're played.
 
-Points: 2 for a win, 1 each for a tie (the engine has no super over). The table
+Points: 2 for a win. A tie goes to a super over, as in the IPL (the winner takes
+both points; super-over runs and wickets don't count toward the caps). The table
 is sorted by points, then net run rate, IPL style: runs per over scored minus
-conceded, a side bowled out counted as having faced its full 20 overs. A tied
-playoff goes to the team higher in the table. Playoff fixtures are drawn once the
+conceded, a side bowled out counted as having faced its full 20 overs. If even the
+super overs can't separate them, a tied playoff goes to the team higher in the table. Playoff fixtures are drawn once the
 league stage is over.
 """
 
@@ -32,7 +33,7 @@ def _summary(n: int, stage: str, m, lineups: dict) -> dict:
     best = max(bowls, key=lambda b: (b["wickets"], -b["runs"]))
     return {
         "match": n, "stage": stage, "teams": list(m.teams), "winner": m.winner, "margin": m.margin,
-        "result": "tie" if m.winner is None else "win",
+        "result": m.result,                     # "win", "super over" or (no super over) "tie"
         "scores": [{"team": i["batting"], "runs": i["runs"], "wickets": i["wickets"], "overs": i["overs"]}
                    for i in d["innings"]],
         "top_scorer": {"name": top["name"], "runs": top["runs"], "balls": top["balls"]},

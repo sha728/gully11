@@ -39,8 +39,9 @@ cap tallies (plain JSON, updated each step); full matches are in `sim_results`
   group twice, its counterpart in the other group twice, the rest once: 14 matches,
   70 in all). Smaller rooms play a double round robin. Matches are ordered so teams
   get rest between games.
-- **Points:** 2 for a win, 1 each for a tie (no super over yet); table by points then
+- **Points:** 2 for a win; a tie goes to a super over (see simulator.md), whose
+  winner takes the points. Table by points then
   net run rate (all-out innings count as 20 overs).
 - **Playoffs:** Qualifier 1 (1v2), Eliminator (3v4), Qualifier 2, Final; two or three
-  teams play a final. A tied playoff goes to the team higher in the table.
+  teams play a final. Playoff ties also go to a super over.
 - **Caps:** Orange (runs) and Purple (wickets), shown once the season is over.

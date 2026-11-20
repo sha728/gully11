@@ -34,7 +34,7 @@ export interface MatchSummary {
   teams: [string, string];
   winner: string | null;
   margin: string;
-  result: "win" | "tie";
+  result: "win" | "tie" | "super over";
   scores: { team: string; runs: number; wickets: number; overs: string }[];
   top_scorer: { name: string; runs: number; balls: number };
   best_bowler: { name: string; wickets: number; runs: number };

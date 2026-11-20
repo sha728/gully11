@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { glyph, keyMoments, liveState, overEnds, type LiveState, type Moment } from "@/lib/replay";
 import { cn } from "@/lib/utils";
-import type { BallEvent, Challenge, FullMatch, InningsCard } from "@/lib/xi";
+import { superOverNo, type BallEvent, type Challenge, type FullMatch, type InningsCard } from "@/lib/xi";
 
 const YOU = "Your XI";
 const BALLS: Record<string, number | null> = { Test: null, ODI: 300, T20I: 120, IPL: 120 };
@@ -39,7 +39,7 @@ export function MatchDay({ challenge, match, n, live, vs, summary }: {
   const before = challenge.matches.slice(0, n - 1);
   const sofar = (upto: typeof before) => {
     const w = upto.filter((m) => m.winner === YOU).length;
-    const l = upto.filter((m) => m.result === "win" && m.winner !== YOU).length;
+    const l = upto.filter((m) => m.winner && m.winner !== YOU).length;
     return `${w}–${l}`;
   };
   const q = (extra: string) => `?${[live ? "live=1" : "", vs ? `vs=${vs}` : "", extra].filter(Boolean).join("&")}`;
@@ -127,6 +127,10 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
         {revealed && (
           <TabsContent value="card" className="space-y-12">
             {match.innings.map((inn, i) => <InningsTable key={i} inn={inn} n={i + 1} isTest={isTest} who={who} />)}
+            {match.super_overs?.map((inn, i) => (
+              <InningsTable key={`so${i}`} inn={inn} n={match.innings.length + i + 1} isTest={false} who={who}
+                note={match.super_overs!.length > 2 ? `super over ${Math.floor(i / 2) + 1}` : "super over"} />
+            ))}
           </TabsContent>
         )}
         {revealed && !isTest && <TabsContent value="worm"><Worm match={match} who={who} /></TabsContent>}
@@ -174,7 +178,8 @@ function Replay({ match, isTest, ballsPerInnings, who, live, cursor, setCursor, 
 
   return (
     <div className="space-y-5">
-      <Board state={state} who={who} isTest={isTest} winProb={winProb ?? null} firstBatting={firstBatting} secondBatting={secondBatting} />
+      <Board state={state} who={who} isTest={isTest} winProb={winProb ?? null} firstBatting={firstBatting} secondBatting={secondBatting}
+        superOver={superOverNo(match, state.inns)} />
 
       <div className="flex flex-wrap items-center gap-2">
         {done && !playing ? (
@@ -219,7 +224,7 @@ function Replay({ match, isTest, ballsPerInnings, who, live, cursor, setCursor, 
               <li key={`b${row.i}`} className={cn("flex gap-3 py-2 text-sm", k === 0 && playing && "animate-in fade-in slide-in-from-top-1",
                 row.e.text.startsWith("Captain's hunch") && "bg-signal/5")}>
                 <span className="w-14 shrink-0 font-mono text-[11px] text-muted-foreground tnum">
-                  {isTest ? `${row.e.inns}·` : ""}{row.e.ball}
+                  {isTest ? `${row.e.inns}·` : superOverNo(match, row.e.inns) ? "SO·" : ""}{row.e.ball}
                 </span>
                 <span className={cn("w-8 shrink-0 text-center font-display text-lg leading-5 font-bold",
                   row.e.kind === "wicket" ? "bg-signal text-signal-foreground" : isBoundary(row.e) ? "text-signal" : "text-muted-foreground")}>
@@ -240,8 +245,9 @@ function Replay({ match, isTest, ballsPerInnings, who, live, cursor, setCursor, 
   );
 }
 
-function Board({ state: s, who, isTest, winProb, firstBatting, secondBatting }: {
+function Board({ state: s, who, isTest, winProb, firstBatting, secondBatting, superOver }: {
   state: LiveState; who: (t: string) => string; isTest: boolean; winProb: number | null; firstBatting?: string; secondBatting: string;
+  superOver: number;
 }) {
   return (
     <div className="bg-[oklch(0.17_0.01_150)] text-[oklch(0.93_0.012_85)]">
@@ -250,13 +256,15 @@ function Board({ state: s, who, isTest, winProb, firstBatting, secondBatting }: 
         <div className="bg-[oklch(0.17_0.01_150)] p-5">
           <div className="flex justify-between font-mono text-[10px] tracking-widest uppercase opacity-70">
             <span>{s.started ? `${who(s.batting)} batting` : "Toss done"}</span>
-            <span>{isTest ? `Innings ${s.inns}` : s.inns === 1 ? "1st innings" : "Chase"}</span>
+            <span className={cn(superOver > 0 && "font-bold text-[oklch(0.67_0.19_27)] opacity-100")}>
+              {isTest ? `Innings ${s.inns}` : superOver ? (superOver % 2 ? "Super over" : "Super over · chase") : s.inns === 1 ? "1st innings" : "Chase"}
+            </span>
           </div>
           <div className="mt-3 font-display text-7xl leading-none font-black text-[oklch(0.67_0.19_27)] tnum">
             {s.runs}/{s.wickets}
           </div>
           <div className="mt-1 font-mono text-xs opacity-70">
-            {s.started ? `${s.overs} overs` : "yet to start"}
+            {s.started ? `${s.overs} ${s.overs === "1" ? "over" : "overs"}` : "yet to start"}
             {s.need && s.started ? ` · need ${s.need.runs} from ${s.need.balls}` : ""}
             {isTest && s.target ? ` · target ${s.target}` : ""}
           </div>
@@ -295,7 +303,7 @@ function Board({ state: s, who, isTest, winProb, firstBatting, secondBatting }: 
           </div>
         </div>
       </div>
-      {winProb != null && (
+      {winProb != null && !superOver && (
         <div className="px-5 pt-3 pb-4">
           <div className="mb-1.5 flex justify-between font-mono text-[11px] uppercase">
             <span>{who(firstBatting ?? "")} {Math.round(winProb * 100)}%</span>
@@ -326,7 +334,7 @@ function Moments({ moments, cursor, onJump, isTest, live }: {
               className={cn("flex w-full items-baseline gap-2 border-l-2 px-2 py-1.5 text-left text-xs hover:bg-muted",
                 m.kind === "wicket" ? "border-signal" : m.kind === "innings" ? "border-foreground" : "border-chart-2",
                 m.at === cursor && "bg-muted")}>
-              <span className="w-12 shrink-0 font-mono text-[10px] text-muted-foreground tnum">{isTest ? `${m.inns}·` : ""}{m.ball}</span>
+              <span className="w-12 shrink-0 font-mono text-[10px] text-muted-foreground tnum">{isTest ? `${m.inns}·` : m.inns > 2 ? "SO·" : ""}{m.ball}</span>
               <span className={cn("min-w-0 flex-1", (m.kind === "milestone" || m.kind === "innings") && "font-semibold")}>{m.label}</span>
             </button>
           </li>
@@ -338,7 +346,9 @@ function Moments({ moments, cursor, onJump, isTest, live }: {
 
 // ---------------------------------------------------------------- scorecard
 
-function InningsTable({ inn, n, isTest, who }: { inn: InningsCard; n: number; isTest: boolean; who: (t: string) => string }) {
+function InningsTable({ inn, n, isTest, who, note }: {
+  inn: InningsCard; n: number; isTest: boolean; who: (t: string) => string; note?: string;
+}) {
   const batted = inn.batting_card.filter((b) => b.how_out);
   const dnb = inn.batting_card.filter((b) => !b.how_out);
   const extras = inn.extras.wides + inn.extras.noballs + inn.extras.byes;
@@ -347,6 +357,7 @@ function InningsTable({ inn, n, isTest, who }: { inn: InningsCard; n: number; is
       <div className="flex flex-wrap items-baseline gap-3">
         <span className="font-mono text-xs text-signal tnum">{String(n).padStart(2, "0")}</span>
         <h3 className="font-display text-3xl font-extrabold uppercase">{who(inn.batting)} {isTest ? `· innings ${n}` : ""}</h3>
+        {note && <span className="bg-signal px-2 py-0.5 font-mono text-[10px] tracking-widest text-signal-foreground uppercase">{note}</span>}
         <span className="ml-auto font-display text-3xl font-bold tnum">
           {inn.runs}/{inn.wickets}{inn.declared ? "d" : ""} <span className="font-mono text-sm text-muted-foreground">({inn.overs})</span>
         </span>
@@ -431,6 +442,7 @@ function Worm({ match, who }: { match: FullMatch; who: (t: string) => string }) 
   const data = useMemo(() => {
     const byOver: Record<number, { over: number; a?: number; b?: number }> = {};
     for (const e of match.commentary) {
+      if (e.inns > 2) continue;     // super overs aren't part of the worm
       const over = Number(e.ball.split(".")[0]) + 1;
       const runs = Number(e.score.split("/")[0]);
       const row = (byOver[over] ??= { over });

@@ -168,8 +168,27 @@ and economy (McGrath 21.6 at 2.49).
   elsewhere, are the next levers. Rating damping is the quick fix if needed.
 - Calibration is per environment. Only `IPL_recent` is fitted; other
   environments run uncalibrated until fitted on their own matches.
-- Free hits, super overs (ties stand as ties), DLS and Test matches are not
-  modelled yet.
+- Free hits and DLS are not modelled yet.
+
+## Super over
+
+A tied T20 (IPL, T20I) goes to a super over; ODI ties stand (pass
+`super_over=True/False` to `simulate_match` to override). ICC playing conditions:
+
+- The side that batted second bats first. One over, two wickets (three batters).
+- Each captain sends in three batters, picked from their death-overs hitting
+  (runs per ball minus twice the dismissal rate), and one bowler, picked by the
+  same value used for bowling changes. A better captain picks closer to the best
+  option (the bowling-change temperature).
+- Batters swing hard: aggression 1.9 setting a total; chasing, scaled by the
+  rate needed (2 a ball is par). With average sides that gives about 12 runs per
+  super over, a little under the IPL's real average, where teams send in their best.
+- A tied super over is played again with the other side batting first; batters
+  dismissed and bowlers used in an earlier one sit out. After four tied super
+  overs (never seen in practice) the side with more boundaries in the match wins.
+- Super-over balls are in the commentary as innings 3, 4, ... and their cards in
+  `super_overs`; they have no win-probability line and don't count toward season caps.
+
 
 ## Design choices (not from any source)
 

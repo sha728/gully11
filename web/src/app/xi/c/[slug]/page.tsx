@@ -110,8 +110,8 @@ export default async function SeriesPage({ params, searchParams }: Props) {
                   </span>
                 </span>
                 {p.kind === "legend" && <Badge className="bg-signal font-mono text-[9px] text-signal-foreground">Legend</Badge>}
-                <span className="w-24 text-right font-mono text-xs text-muted-foreground tnum">
-                  {fmt(p.runs)}r · {fmt(p.wickets)}w
+                <span className="shrink-0 text-right font-mono text-xs text-muted-foreground tnum">
+                  {keyStats(p.role, p.runs, p.wickets)}
                 </span>
               </li>
             ))}
@@ -138,6 +138,14 @@ export default async function SeriesPage({ params, searchParams }: Props) {
       </div>
     </div>
   );
+}
+
+/** The numbers that matter for the role: runs for batters and keepers, wickets
+ * for bowlers, both for all-rounders. */
+function keyStats(role: string, runs: number | null, wickets: number | null) {
+  const r = `${fmt(runs)} runs`;
+  const w = `${fmt(wickets)} wkts`;
+  return role === "BOWL" ? w : role === "AR" ? `${r} · ${w}` : r;
 }
 
 function MatchCard({ m, slug, them }: { m: MatchSummary; slug: string; them: string }) {

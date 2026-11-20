@@ -2,7 +2,7 @@
 // season so far, which the host moves on one match (or more) at a time.
 
 import { API_URL, type Role } from "@/lib/api";
-import type { FullMatch } from "@/lib/xi";
+import type { CaptainRecord, FullMatch } from "@/lib/xi";
 
 export interface SeasonPlayer {
   id: string;
@@ -13,6 +13,7 @@ export interface SeasonPlayer {
   price: number;
   retained: boolean;
   opener: boolean;
+  captaincy: CaptainRecord | null;
 }
 
 export interface SetupTeam {
@@ -24,6 +25,7 @@ export interface SetupTeam {
   xi: string[];
   impact: string | null;
   picked: boolean;
+  captain: string | null;
 }
 
 export interface MatchSummary {
@@ -36,7 +38,7 @@ export interface MatchSummary {
   scores: { team: string; runs: number; wickets: number; overs: string }[];
   top_scorer: { name: string; runs: number; balls: number };
   best_bowler: { name: string; wickets: number; runs: number };
-  lineups: Record<string, { xi: string[]; impact: string | null; picked: boolean }>;
+  lineups: Record<string, { xi: string[]; impact: string | null; picked: boolean; captain?: string | null }>;
 }
 
 export interface CapRow {
@@ -91,8 +93,8 @@ const base = (code: string) => `/rooms/${encodeURIComponent(code)}/season`;
 
 export const seasonApi = {
   get: (code: string, token: string | null) => call<SeasonView>(`${base(code)}${token ? `?token=${encodeURIComponent(token)}` : ""}`),
-  lineup: (code: string, token: string, xi: string[], impact: string | null) =>
-    call<{ ok: boolean }>(`${base(code)}/lineup`, { method: "PUT", body: JSON.stringify({ token, xi, impact }) }),
+  lineup: (code: string, token: string, xi: string[], impact: string | null, captain: string | null) =>
+    call<{ ok: boolean }>(`${base(code)}/lineup`, { method: "PUT", body: JSON.stringify({ token, xi, impact, captain }) }),
   start: (code: string, token: string | null) =>
     call<SeasonView>(`${base(code)}/start`, { method: "POST", body: JSON.stringify({ token }) }),
   advance: (code: string, token: string | null, how: "next" | "mine" | "end") =>

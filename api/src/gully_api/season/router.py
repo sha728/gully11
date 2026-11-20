@@ -17,6 +17,7 @@ class Lineup(BaseModel):
     token: str
     xi: list[str] = Field(min_length=11, max_length=11)
     impact: str | None = None
+    captain: str | None = None       # one of the XI; None = the best-rated captain in it
 
 
 class Step(BaseModel):
@@ -49,7 +50,7 @@ def set_lineup(code: str, req: Lineup, conn=Depends(get_conn)) -> dict[str, Any]
     if fid is None:
         raise HTTPException(403, "You didn't run a franchise in this auction.")
     try:
-        S.save_lineup(conn, room, fid, req.xi, req.impact)
+        S.save_lineup(conn, room, fid, req.xi, req.impact, req.captain)
     except S.SeasonError as e:
         raise HTTPException(422, str(e)) from e
     conn.commit()

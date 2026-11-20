@@ -18,6 +18,7 @@ from datetime import date
 from pathlib import Path
 
 from ..settings import settings
+from ..sim import captaincy
 from ..sim import Profile, Team, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
 
 FULL_MEMBERS = ["India", "Australia", "England", "South Africa", "New Zealand", "Pakistan",
@@ -175,6 +176,8 @@ def candidates(conn, fmt: str, era: str, unit: str) -> list[dict]:
                 })
 
     for c in out:
+        # Captaincy record in this format (legends by their legend id, else their Cricsheet id).
+        c["captaincy"] = captaincy.summary(c["id"], fmt) or captaincy.summary(c["person"], fmt)
         c["value"] = (c["runs"] or 0) + spec.wicket_value * (c["wickets"] or 0)
         c["spinner"] = c["spinner"] and c["role"] in ("BOWL", "AR")
         c["slots"] = eligible_slots(c)
@@ -364,22 +367,30 @@ def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
 def world_xi(conn, fmt: str) -> Team:
     cfg = WORLD_XI[fmt]
     prof = profiles(conn, fmt, cfg["players"])
-    return Team(cfg["name"], [prof[i] for i in cfg["players"]], keeper=cfg["keeper"])
+    cap = cfg.get("captain") or captaincy.best(cfg["players"], fmt)
+    return Team(cfg["name"], [prof[i] for i in cfg["players"]], keeper=cfg["keeper"],
+                captain=cap, captaincy=captaincy.rating(cap, fmt) if cap else 0.0)
 
 
-def challenge_slug(fmt: str, seed: int, picks: list[str], slots: list[int]) -> str:
+def challenge_slug(fmt: str, seed: int, picks: list[str], slots: list[int], captain: str | None = None) -> str:
     key = f"{fmt}:{seed}:{','.join(picks)}:{','.join(map(str, slots))}"
+    if captain:
+        key += f":c={captain}"        # same XI, different captain: a different challenge
     return hashlib.blake2b(key.encode(), digest_size=6).hexdigest()
 
 
 def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
-                name: str = "Your XI") -> dict:
+                name: str = "Your XI", captain: str | None = None) -> dict:
     """Validate, then play five seeded matches against the Greats, batting in the
-    chosen order. Returns a summary plus the full match records."""
+    chosen order, led by ``captain`` (one of the XI; default: the best-rated
+    captain in it). Returns a summary plus the full match records."""
     ordered = validate(conn, fmt, seed, picks, slots)
     prof = profiles(conn, fmt, [r["id"] for r in ordered])
     keeper = next(r["id"] for r in ordered if r["role"] == "WK")
-    mine = Team(name, [prof[r["id"]] for r in ordered], keeper=keeper)
+    if captain not in picks:
+        captain = captaincy.best(picks, fmt) or ordered[0]["id"]
+    mine = Team(name, [prof[r["id"]] for r in ordered], keeper=keeper,
+                captain=captain, captaincy=captaincy.rating(captain, fmt))
     them = world_xi(conn, fmt)
     env = load_env(FORMATS[fmt].env)
     sim = simulate_test if env.is_test else simulate_match
@@ -399,9 +410,15 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
 
     w, l = tally["won"], tally["lost"]
     verdict = ("Series won" if w > l else "Series lost" if l > w else "Series drawn") + f" {w}–{l}"
+    def lead(team: Team) -> dict:
+        p = next(x for x in team.players if x.id == team.captain) if team.captain else None
+        return {"id": team.captain, "name": p.name if p else None, "rating": team.captaincy,
+                "record": captaincy.summary(team.captain, fmt) if team.captain else None}
+
     return {
-        "slug": challenge_slug(fmt, seed, picks, slots),
+        "slug": challenge_slug(fmt, seed, picks, slots, captain),
         "format": fmt, "seed": seed, "picks": picks, "slots": slots, "opponent": them.name,
+        "captains": {"mine": lead(mine), "them": lead(them)},
         "xi": [{**r, "order": r["slot"]} for r in ordered],
         "result": {**tally, "verdict": verdict},
         "matches": [_summary(m, i + 1) for i, m in enumerate(matches)],

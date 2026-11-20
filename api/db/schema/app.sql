@@ -63,3 +63,6 @@ CREATE TABLE IF NOT EXISTS seasons (
     created_at  timestamptz NOT NULL DEFAULT now(),
     played_at   timestamptz
 );
+
+-- The captain the person picked for their XI (null: the best-rated captain in it).
+ALTER TABLE xi_drafts ADD COLUMN IF NOT EXISTS captain text;

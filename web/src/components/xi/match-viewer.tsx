@@ -103,6 +103,11 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
           </h1>
         )}
         <div className="seam mt-5" aria-hidden />
+        {match.toss && (
+          <p className="mt-3 font-mono text-xs text-muted-foreground">
+            Toss: {who(match.toss.winner)} won it{match.toss.captain ? ` (captain ${match.toss.captain})` : ""} and chose to {match.toss.decision} first.
+          </p>
+        )}
       </div>
 
       {revealed && live && after}

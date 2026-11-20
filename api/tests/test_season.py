@@ -153,7 +153,12 @@ def test_season_end_to_end():
         assert len(s["season"]["matches"]) == 1
         # Change the guest's XI mid-season: their next match uses it.
         changed = new_xi[::-1]
-        assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed, "impact": mine["impact"]}).status_code == 200
+        bench = next(p["id"] for p in mine["players"] if p["id"] not in changed)
+        bad_cap = client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed, "impact": mine["impact"],
+                                                  "captain": bench})
+        assert bad_cap.status_code == 422                   # a bench player can't captain
+        assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed, "impact": mine["impact"],
+                                               "captain": changed[5]}).status_code == 200
         before = len(s["season"]["matches"])
         while True:
             s = client.post(f"{A}/advance", json={"token": host, "how": "next"}).json()
@@ -161,6 +166,9 @@ def test_season_end_to_end():
             if guest.id in last["lineups"]:
                 break
         assert last["match"] > before and last["lineups"][guest.id]["xi"] == changed
+        assert last["lineups"][guest.id]["captain"] == changed[5]
+        bot = next(f for f in last["lineups"] if f != guest.id)
+        assert last["lineups"][bot]["captain"] in last["lineups"][bot]["xi"]
         s = client.post(f"{A}/advance", json={"token": host, "how": "end"}).json()
         assert s["finished"] and len(s["season"]["matches"]) == 16 and s["season"]["champion"]
         assert {m["stage"] for m in s["season"]["matches"][-4:]} == {"Qualifier 1", "Eliminator", "Qualifier 2", "Final"}

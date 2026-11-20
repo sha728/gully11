@@ -47,6 +47,10 @@ class Team:
     keeper: str | None = None            # id (auto: first WK, else last batter)
     # Bowling-only substitutes (IPL Impact Player): can bowl, never bat.
     impact: list[Profile] = field(default_factory=list)
+    captain: str | None = None           # id of the captain (in the XI)
+    # Tactical skill of the captain, 0..1 (from their captaincy record; 0 = never
+    # captained): the toss call and bowling changes. See sim/captaincy.py.
+    captaincy: float = 0.0
 
     def __post_init__(self):
         if len(self.players) != 11:
@@ -145,13 +149,14 @@ class MatchResult:
     commentary: list[dict]
     win_prob: list[tuple[str, float]]   # (ball label, P(team batting first wins)); limited overs only
     result: str = "win"         # win / tie / draw
+    toss: dict | None = None    # {"winner", "decision", "captain", "called_right"}
 
     def to_dict(self) -> dict:
         return {
             "seed": self.seed, "env": self.env, "teams": list(self.teams),
             "innings": [i.to_dict() for i in self.innings],
             "winner": self.winner, "margin": self.margin, "result": self.result,
-            "commentary": self.commentary, "win_prob": self.win_prob,
+            "commentary": self.commentary, "win_prob": self.win_prob, "toss": self.toss,
         }
 
 
@@ -194,6 +199,7 @@ class _Match:
     def __init__(self, env: Env, seed: int, commentary: bool):
         self.env = env
         self.rng = random.Random(seed)
+        self.toss: dict | None = None
         self.with_commentary = commentary
         self.commentary: list[dict] = []
         self.win_prob: list[tuple[str, float]] = []
@@ -282,7 +288,8 @@ class _Match:
             return 20 * wk - rpb - (p.wide[ph] + p.noball[ph])
 
         # Keep the two best death bowlers' last overs for the death (limited overs).
-        if phase != "death" and not env.is_test:
+        # A good captain does it reliably; a poor one sometimes burns them early.
+        if phase != "death" and not env.is_test and self.rng.random() < 0.6 + 0.4 * team.captaincy:
             death_first = env.phase_starts[-1][0]
             reserve = max(1, (env.overs - death_first) // 4)
             best_death = sorted(options, key=lambda b: value(b, "death"), reverse=True)[:2]
@@ -297,7 +304,10 @@ class _Match:
         else:
             scores = [value(b, phase) + 0.5 * left[b] / overs_left for b in eligible]
         top = max(scores)
-        weights = [math.exp((s - top) / 0.12) for s in scores]
+        # How far the choice strays from the best option: tighter for a better
+        # captain (0.12, the engine's old fixed value, is a middling captain).
+        temp = BOWLING_TEMP * (1.6 - 1.2 * team.captaincy)
+        weights = [math.exp((s - top) / temp) for s in scores]
         total = sum(weights)
         return eligible[_pick(self.rng, [w / total for w in weights])]
 
@@ -513,6 +523,24 @@ class _Match:
         return kind, None
 
 
+BOWLING_TEMP = 0.12      # spread of bowling choices for a middling captain
+
+
+def _toss(rng, a: Team, b: Team, env: Env) -> tuple[int, dict]:
+    """A coin decides who wins the toss; their captain chooses. In this engine the
+    stronger choice is to bowl first in limited-overs cricket (chasing sides win
+    55% of T20s, 61% of ODIs) and to bat first in Tests (60% to 37%); a captain
+    makes it with probability 0.5 + 0.45 * captaincy. Returns (team batting first:
+    0 = a, 1 = b) and what happened."""
+    won = rng.randrange(2)
+    team = (a, b)[won]
+    right = rng.random() < 0.5 + 0.45 * team.captaincy
+    bat = env.is_test == right                  # Tests: bat if right; limited overs: bowl if right
+    captain = next((p.name for p in team.players if p.id == team.captain), None)
+    return (won if bat else 1 - won), {"winner": team.name, "decision": "bat" if bat else "bowl",
+                                        "captain": captain, "called_right": right}
+
+
 def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
                    bat_first: int | None = None, commentary: bool = True) -> MatchResult:
     """Simulate one limited-overs match. ``bat_first``: 0 = team_a, 1 = team_b,
@@ -523,7 +551,7 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
         raise ValueError(f"{env.name} is a Test environment; use simulate_test")
     m = _Match(env, seed, commentary)
     if bat_first is None:
-        bat_first = m.rng.randrange(2)
+        bat_first, m.toss = _toss(m.rng, team_a, team_b, env)
     first, second = (team_a, team_b) if bat_first == 0 else (team_b, team_a)
     i1 = m.innings(first, second, 1, None)
     i2 = m.innings(second, first, 2, i1.runs + 1)
@@ -535,7 +563,7 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
         winner, margin = first.name, f"won by {_n(i1.runs - i2.runs, 'run')}"
     else:
         winner, margin = None, "match tied"
-    return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name),
+    return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name),
                        innings=[i1, i2], winner=winner, margin=margin,
                        commentary=m.commentary, win_prob=m.win_prob)
 
@@ -569,7 +597,7 @@ def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
         raise ValueError(f"{env.name} is a limited-overs environment; use simulate_match")
     m = _Match(env, seed, commentary)
     if bat_first is None:
-        bat_first = m.rng.randrange(2)
+        bat_first, m.toss = _toss(m.rng, team_a, team_b, env)
     first, second = (team_a, team_b) if bat_first == 0 else (team_b, team_a)
     # Weather and bad light: some matches lose overs. How often is fitted to the real
     # draw rate (validate_test_sim.py --fit); a design choice, not from any source.
@@ -583,12 +611,12 @@ def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
     innings = [i1]
 
     def draw() -> MatchResult:
-        return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
+        return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
                            winner=None, margin="match drawn", commentary=m.commentary,
                            win_prob=[], result="draw")
 
     def won(team: Team, margin: str) -> MatchResult:
-        return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
+        return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
                            winner=team.name, margin=margin, commentary=m.commentary, win_prob=[])
 
     if left <= 0:
@@ -631,7 +659,7 @@ def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
         return won(fourth, f"won by {_n(10 - i4.wickets, 'wicket')}")
     if i4.wickets >= 10:
         if i4.runs == need - 1:
-            return MatchResult(seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
+            return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
                                winner=None, margin="match tied", commentary=m.commentary,
                                win_prob=[], result="tie")
         return won(third, f"won by {_n(need - 1 - i4.runs, 'run')}")

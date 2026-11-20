@@ -154,3 +154,21 @@ def test_world_xis_obey_the_draft_rules(client, fmt):
                 rows.append({"person": pid, "role": r["role"], "country": r["country"]})
         service.check_rules(fmt, rows)
         assert len(prof) == 11 and cfg["keeper"] in cfg["players"]
+
+
+def test_captain_choice_leads_the_series(client):
+    d = fill(client, draft(client, format="IPL", seed=4242))
+    ids = [slot["player"]["id"] for slot in d["lineup"] if slot["player"]]
+    assert len(ids) == 11 and d["captain"] is None and d["captain_auto"] in ids
+    bad = client.post(f"{X}/drafts/{d['id']}/captain", json={"player": "not-in-the-xi"})
+    assert bad.status_code == 422
+    chosen = ids[-1]                                       # the No. 11 as captain
+    v = client.post(f"{X}/drafts/{d['id']}/captain", json={"player": chosen}).json()
+    assert v["captain"] == chosen
+    slug = client.post(f"{X}/drafts/{d['id']}/play").json()["slug"]
+    c = client.get(f"{X}/challenge/{slug}").json()
+    assert c["captain"] == chosen and c["captains"]["mine"]["id"] == chosen
+    them = c["captains"]["them"]
+    assert them["id"] and them["rating"] > 0                 # the Greats are led by a real captain
+    m = client.get(f"{X}/challenge/{slug}/match/1").json()
+    assert m["toss"]["winner"] in m["teams"] and m["toss"]["decision"] in ("bat", "bowl")

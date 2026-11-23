@@ -17,7 +17,7 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains" }
 export const maxDuration = 60;
 
 export const metadata: Metadata = {
-  title: { default: "Gully11 — cricket, ball by ball", template: "%s — Gully11" },
+  title: { default: "Gully XI — cricket, ball by ball", template: "%s — Gully XI" },
   description:
     "Career and season numbers, phase splits, head-to-heads and ground records for Tests, ODIs, T20Is and the IPL.",
 };

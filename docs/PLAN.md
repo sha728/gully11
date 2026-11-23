@@ -249,7 +249,7 @@ The simulator comes before both game modes because the XI series and the post-au
 
 - [x] Exact IPL bid increment slabs and the mega-auction purse figure: ₹5/10/20/25 L slabs, ₹120 cr purse (see docs/auction.md).
 - [ ] Which Kaggle auction dataset to use, and its license.
-- [ ] App name (Gully11 is a placeholder).
+- [x] App name: Gully XI (gullyxi.com; Gully11 was a placeholder and gully11.com is taken).
 - [ ] Free hosting limits for WebSockets on the chosen platform.
 
 **Flagged as my design choices, not from any source** (so you can defend them in an interview): the log5 + shrinkage simulator design, the 15 s / 10 s timer values, bot personalities, LightGBM for the price model, money stored in lakh, the 5% validation threshold, initials avatars instead of photos.

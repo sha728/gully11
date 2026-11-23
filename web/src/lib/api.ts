@@ -1,4 +1,4 @@
-// Typed client for the Gully11 API. Used from server components (SSR) and,
+// Typed client for the Gully XI API. Used from server components (SSR) and,
 // for search/typeahead, from the browser.
 
 export const API_URL =

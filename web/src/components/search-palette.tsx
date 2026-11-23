@@ -85,7 +85,7 @@ export function SearchPaletteProvider({ children }: { children: React.ReactNode 
   return (
     <Ctx.Provider value={{ open: () => setOpen(true) }}>
       {children}
-      <CommandDialog open={open} onOpenChange={setOpen} title="Search Gully11"
+      <CommandDialog open={open} onOpenChange={setOpen} title="Search Gully XI"
         description="Find a player or a ground" className="sm:max-w-xl">
         {/* Results come from the API already ranked, so cmdk's own filter stays off. */}
         <Command shouldFilter={false}>

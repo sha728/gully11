@@ -1,7 +1,7 @@
 [project]
 name = "gully-pipeline"
 version = "0.1.0"
-description = "Cricsheet ingestion and aggregation for Gully11"
+description = "Cricsheet ingestion and aggregation for Gully XI"
 requires-python = ">=3.12"
 dependencies = [
     "pyarrow>=17",

@@ -1,4 +1,4 @@
-# Render Blueprint: the Gully11 API for the dev site (free plan).
+# Render Blueprint: the Gully XI API for the dev site (free plan).
 # Render: New > Blueprint > pick this repo. It asks for DATABASE_URL (Neon) once.
 # Free plan: the service sleeps after 15 idle minutes (first visit then takes about
 # a minute) and a live auction room is lost if everyone goes idle.

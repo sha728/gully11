@@ -59,20 +59,31 @@ export default async function ComparePage({ searchParams }: { searchParams: SP }
   );
 }
 
+type Side = "bat" | "bowl";
+
+function sidesOf(p: CP): Set<Side> {
+  return new Set<Side>(p.role === "BOWL" ? ["bowl"] : p.role === "AR" ? ["bat", "bowl"] : ["bat"]);
+}
+
 function Result({ cmp }: { cmp: Comparison }) {
   const [A, B] = cmp.players;
   const range = cmp.from_year || cmp.to_year ? `${cmp.from_year ?? "start"}–${cmp.to_year ?? "now"}` : "career";
   const empty = [A, B].filter((p) => !p.totals.matches);
-  const radar = A.metrics.map((m, i) => ({ label: m.label, a: m.percentile, b: B.metrics[i].percentile }));
+  // Judge each player on what they do: batters on batting, bowlers on bowling, all-rounders on both.
+  // Two players are compared on the sides they share; a batter against a bowler has none, so show both.
+  const shared = [...sidesOf(A)].filter((s) => sidesOf(B).has(s));
+  const sides = new Set<Side>(shared.length ? shared : ["bat", "bowl"]);
+  const rows = A.metrics.map((m, i) => ({ m, mb: B.metrics[i] })).filter(({ m }) => sides.has(m.side));
+  const radar = rows.map(({ m, mb }) => ({ label: m.label, a: m.percentile, b: mb.percentile }));
 
-  const totals: [string, (p: CP) => string, (p: CP) => number][] = [
-    ["Matches", (p) => fmt(p.totals.matches), (p) => p.totals.matches],
-    ["Runs", (p) => fmt(p.totals.runs), (p) => p.totals.runs],
-    ["100s / 50s", (p) => `${p.totals.hundreds} / ${p.totals.fifties}`, (p) => p.totals.hundreds * 2 + p.totals.fifties],
-    ["Overs", (p) => overs(p.totals.balls_bowled), (p) => p.totals.balls_bowled],
-    ["Wickets", (p) => fmt(p.totals.wickets), (p) => p.totals.wickets],
-    ["Catches", (p) => fmt(p.totals.catches), (p) => p.totals.catches],
-  ];
+  const totals = ([
+    ["Matches", (p) => fmt(p.totals.matches), (p) => p.totals.matches, null],
+    ["Runs", (p) => fmt(p.totals.runs), (p) => p.totals.runs, "bat"],
+    ["100s / 50s", (p) => `${p.totals.hundreds} / ${p.totals.fifties}`, (p) => p.totals.hundreds * 2 + p.totals.fifties, "bat"],
+    ["Overs", (p) => overs(p.totals.balls_bowled), (p) => p.totals.balls_bowled, "bowl"],
+    ["Wickets", (p) => fmt(p.totals.wickets), (p) => p.totals.wickets, "bowl"],
+    ["Catches", (p) => fmt(p.totals.catches), (p) => p.totals.catches, null],
+  ] as [string, (p: CP) => string, (p: CP) => number, Side | null][]).filter(([, , , s]) => !s || sides.has(s));
 
   return (
     <div className="space-y-10">
@@ -89,8 +100,7 @@ function Result({ cmp }: { cmp: Comparison }) {
 
         <Section n={2} title="Where each one wins">
           <div className="space-y-4">
-            {A.metrics.map((m, i) => {
-              const mb = B.metrics[i];
+            {rows.map(({ m, mb }) => {
               // Only call a winner when both have enough balls to be ranked.
               const better = m.qualified && mb.qualified && m.value != null && mb.value != null && m.value !== mb.value
                 ? ((m.value > mb.value) === m.higher_is_better ? "a" : "b") : null;

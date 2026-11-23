@@ -20,13 +20,13 @@ const NAV = [
 
 export function Wordmark() {
   return (
-    <Link href="/" className="group flex items-center gap-2" aria-label="Gully11 home">
+    <Link href="/" className="group flex items-center gap-2" aria-label="Gully XI home">
       {/* a ball with its seam */}
       <span className="relative grid size-5 place-items-center rounded-full bg-signal">
         <span className="absolute inset-y-0.5 w-px border-l border-dashed border-signal-foreground/70" />
       </span>
       <span className="font-display text-2xl leading-none font-extrabold tracking-tight uppercase">
-        Gully<span className="text-signal">11</span>
+        Gully<span className="text-signal">XI</span>
       </span>
     </Link>
   );

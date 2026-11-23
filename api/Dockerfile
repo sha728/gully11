@@ -1,4 +1,4 @@
-# The Gully11 API (FastAPI + simulator). Built by Render from render.yaml; the same
+# The Gully XI API (FastAPI + simulator). Built by Render from render.yaml; the same
 # image runs locally: docker build -t gully11-api api && docker run -p 8000:8000 ...
 FROM python:3.13-slim
 

@@ -1,4 +1,4 @@
-# Gully11
+# Gully XI
 
 [![CI](https://github.com/sha728/gully11/actions/workflows/ci.yml/badge.svg)](https://github.com/sha728/gully11/actions/workflows/ci.yml)
 

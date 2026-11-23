@@ -1,4 +1,4 @@
-# Copy your local Gully11 player data (players, stats, venues, legends) to a hosted
+# Copy your local Gully XI player data (players, stats, venues, legends) to a hosted
 # Postgres, e.g. Neon:
 #   .\api\scripts\copy_db.ps1                  # asks for the connection string (hidden)
 #   .\api\scripts\copy_db.ps1 -Target "postgresql://user:pass@host/db?sslmode=require"

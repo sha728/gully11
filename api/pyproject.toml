@@ -1,7 +1,7 @@
 [project]
 name = "gully-api"
 version = "0.1.0"
-description = "Gully11 API: stats, simulator, auction rooms"
+description = "Gully XI API: stats, simulator, auction rooms"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

@@ -25,7 +25,7 @@ $container = "gully11-postgres-1"
 # Tables the pipeline loads (api/db/schema/players.sql); everything else belongs to the app.
 $playerTables = @("players", "player_format_stats", "player_season_stats", "player_phase_stats",
                   "player_phase_form", "player_dismissals", "player_venue_stats", "player_teams",
-                  "player_opening", "venues", "venue_format_stats", "legends")
+                  "player_opening", "player_matchups", "venues", "venue_format_stats", "legends")
 if ($Fresh) {
     $appTables = docker exec $container psql -U gully11 -d gully11 -At -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public'" |
         Where-Object { $_ -and ($playerTables -notcontains $_) }

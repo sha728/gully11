@@ -56,6 +56,12 @@ class Profile:
     wickets: int = 0                       # in the simulated format (part-timer check)
     estimated: bool = False
     meta: dict = field(default_factory=dict)
+    # Matchups (see attach_matchups): batting hand 'L'/'R', bowling 'pace'/'spin',
+    # and per-outcome multipliers against each kind of opponent (1 = no effect).
+    hand: str | None = None
+    kind: str | None = None
+    bat_vs: dict[str, list[float]] = field(default_factory=dict)    # 'pace' / 'spin' -> 7 factors
+    bowl_vs: dict[str, list[float]] = field(default_factory=dict)   # 'L' / 'R' -> 7 factors
 
     def bat_ratio(self, phase: str, env: Env) -> list[float]:
         return [p / b for p, b in zip(self.bat[phase], env.bat_base[phase])]
@@ -149,6 +155,57 @@ def from_phase_rows(player: dict, rows: list[dict], env: Env, league_adjusted: b
     )
 
 
+# ------------------------------------------------------------------ matchups
+
+# Balls of "same as their overall record" behind each split. Splits are noisy: on
+# held-out IPL balls (scripts/matchup_check.py, 2024-26) 100-400 made predictions
+# slightly worse, 1500 slightly better for every kind of ball. Only big samples move.
+K_MATCHUP = 1500
+MATCHUP_CLAMP = (0.6, 1.6)
+_MU_CATS = ("wickets", "dots", "ones", "twos", "threes", "fours", "sixes")   # OUTCOMES order
+SPIN_TYPES = ("off-spin", "leg-spin", "left-arm orthodox", "left-arm wrist-spin")
+
+
+def matchup_factors(rows: list[dict]) -> dict[str, list[float]]:
+    """Per split, how a player's record against that kind of opponent differs from
+    their record overall, per outcome. Rows (player_matchups, one player and role):
+    observed o_* and expected x_* (an average player in the same matchup and
+    context). Each split's ratio o/x is pulled toward the player's overall ratio
+    with K_MATCHUP balls, so a small sample barely moves anything; the factor is
+    split ratio / overall ratio (1 = plays everyone alike)."""
+    rows = [r for r in rows if r["balls"]]
+    if not rows:
+        return {}
+    tot_o = [sum(r[f"o_{c}"] or 0 for r in rows) for c in _MU_CATS]
+    tot_x = [sum(r[f"x_{c}"] or 0 for r in rows) for c in _MU_CATS]
+    overall = [(o / x) if x > 0 else 1.0 for o, x in zip(tot_o, tot_x)]
+    out = {}
+    for r in rows:
+        f = []
+        for i, c in enumerate(_MU_CATS):
+            o, x = r[f"o_{c}"] or 0, r[f"x_{c}"] or 0
+            prior = K_MATCHUP * x / r["balls"]          # K balls' worth of expected count
+            split = (o + prior * overall[i]) / (x + prior) if x + prior > 0 else overall[i]
+            f.append(min(max(split / overall[i], MATCHUP_CLAMP[0]), MATCHUP_CLAMP[1]) if overall[i] > 0 else 1.0)
+        out[r["split"]] = f
+    return out
+
+
+def attach_matchups(prof: Profile, style: dict | None, rows: list[dict]) -> Profile:
+    """Give a profile its batting hand, bowling kind and matchup factors.
+    ``style``: players row (batting_hand, bowling_style / bowling_type);
+    ``rows``: its player_matchups rows for the simulated format family."""
+    if style:
+        prof.hand = style.get("batting_hand")
+        kind = style.get("bowling_style")
+        if not kind and style.get("bowling_type"):
+            kind = "spin" if style["bowling_type"] in SPIN_TYPES else "pace"
+        prof.kind = kind
+    prof.bat_vs = matchup_factors([r for r in rows if r["role"] == "bat"])
+    prof.bowl_vs = matchup_factors([r for r in rows if r["role"] == "bowl"])
+    return prof
+
+
 # ------------------------------------------------------------------ legends
 
 def _tilt(base: list[float], w_rate: float, runs_per_ball: float) -> list[float]:
@@ -231,6 +288,8 @@ def from_legend(row: dict, env: Env) -> Profile:
                        bowl_avg=row.get("bowl_avg") if (row.get("wickets") or 0) >= 10 else None,
                        bowl_econ=row.get("bowl_econ") if (row.get("wickets") or 0) >= 10 else None)
     prof.meta.update(legend=True, sr_estimated=not row.get("bat_sr"))
+    # Hand and bowling kind count against modern players' matchups; legends have no splits of their own.
+    attach_matchups(prof, {"batting_hand": row.get("batting_hand"), "bowling_type": row.get("bowling_type")}, [])
     prof.wickets = row.get("wickets") or 0
     return prof
 
@@ -240,4 +299,5 @@ def expected(vector: list[float]) -> tuple[float, float]:
     return sum(p * r for p, r in zip(vector, RUNS)), vector[0]
 
 
-__all__ = ["Profile", "from_phase_rows", "from_career", "expected", "OUTCOMES"]
+__all__ = ["Profile", "from_phase_rows", "from_career", "expected", "attach_matchups", "matchup_factors",
+           "OUTCOMES", "SPIN_TYPES"]

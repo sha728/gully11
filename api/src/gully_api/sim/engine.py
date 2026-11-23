@@ -237,6 +237,13 @@ class _Match:
             br, wr = bat.bat_ratio(phase, env), bowl.bowl_ratio(phase, env)
             cal = env.calibration[phase]
             raw = [br[i] * wr[i] * env.bat_env[phase][i] * cal[i] for i in range(7)]
+            # Matchups: this batter against this kind of bowling, this bowler
+            # against this batting hand (factors are 1 when unknown).
+            vs_bowl = bat.bat_vs.get(bowl.kind) if bowl.kind else None
+            vs_hand = bowl.bowl_vs.get(bat.hand) if bat.hand else None
+            for m in (vs_bowl, vs_hand):
+                if m:
+                    raw = [r * f for r, f in zip(raw, m)]
             raw[5] *= self.conditions
             raw[6] *= self.conditions
             s = sum(raw)

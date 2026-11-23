@@ -427,6 +427,65 @@ ORDER BY as_of, half_life, pid, format, phase, role;
 """
 
 
+# --------------------------------------------------------------- matchups
+# How a batter does against pace and against spin, and a bowler against left- and
+# right-handers, relative to what an average player got in the same matchup and
+# context. Observed counts (o_*) sit next to expected counts (x_*): the context
+# baseline (competition, year, phase) x the league-wide ratio for that matchup, so
+# o/x = 1 means "as good as an average batter facing spin in these matches".
+# Built per as_of (data before that year only, like player_phase_form) for honest
+# validation; MATCHUP_ALL_DATA holds everything. Needs players' styles (Wikipedia).
+MATCHUP_ALL_DATA = 9999
+
+
+def matchup_sql(as_ofs: list[int]) -> str:
+    grid = ", ".join(f"({a})" for a in [*as_ofs, MATCHUP_ALL_DATA])
+    o = ", ".join(f"sum(m.{c}) AS o_{c}" for c in _FORM_CATS)
+    x = ", ".join(f"sum(m.balls * c.{c} / c.balls) AS x_{c}" for c in _FORM_CATS)
+    ratio = ", ".join(f"sum(o_{c}) / nullif(sum(x_{c}), 0) AS l_{c}" for c in _FORM_CATS)
+    adj = ", ".join(f"b.o_{c}, b.x_{c} * coalesce(l.l_{c}, 1) AS x_{c}" for c in _FORM_CATS)
+    counts = """count(*) FILTER (WHERE {legal}) AS balls,
+           count(*) FILTER (WHERE {legal} AND runs_batter{extra} = 0) AS dots,
+           count(*) FILTER (WHERE {legal} AND runs_batter = 1) AS ones,
+           count(*) FILTER (WHERE {legal} AND runs_batter = 2) AS twos,
+           count(*) FILTER (WHERE {legal} AND runs_batter = 3) AS threes,
+           count(*) FILTER (WHERE {legal} AND is_four) AS fours,
+           count(*) FILTER (WHERE {legal} AND is_six) AS sixes"""
+    bat_counts = counts.format(legal="wides = 0", extra="")
+    bowl_counts = counts.format(legal="is_legal", extra=" + wides + noballs")
+    return f"""
+CREATE OR REPLACE TEMP TABLE mu_bat AS
+SELECT f.batter_id AS pid, f.format, f.ctx, f.yr, f.phase, bp.bowling_style AS split, {bat_counts},
+       count(*) FILTER (WHERE wides = 0 AND is_wicket AND wicket_kind NOT IN {NOT_OUT_KINDS}
+                        AND player_out_id = f.batter_id) AS wickets
+FROM fdc f JOIN players bp ON bp.id = f.bowler_id
+WHERE f.batter_id IS NOT NULL AND bp.bowling_style IS NOT NULL GROUP BY ALL;
+
+CREATE OR REPLACE TEMP TABLE mu_bowl AS
+SELECT f.bowler_id AS pid, f.format, f.ctx, f.yr, f.phase, tp.batting_hand AS split, {bowl_counts},
+       count(*) FILTER (WHERE bowler_credited) AS wickets
+FROM fdc f JOIN players tp ON tp.id = f.batter_id
+WHERE f.bowler_id IS NOT NULL AND tp.batting_hand IS NOT NULL GROUP BY ALL;
+
+CREATE OR REPLACE TABLE player_matchups AS
+WITH grid AS (SELECT * FROM (VALUES {grid}) g(as_of)),
+base AS (
+    SELECT g.as_of, 'bat' AS role, m.pid, {_fam('m.format')} AS fam, m.split, sum(m.balls) AS balls, {o}, {x}
+    FROM mu_bat m JOIN ctx_bat c USING (format, ctx, yr, phase) CROSS JOIN grid g
+    WHERE m.yr < g.as_of AND c.balls > 0 GROUP BY ALL
+    UNION ALL
+    SELECT g.as_of, 'bowl' AS role, m.pid, {_fam('m.format')} AS fam, m.split, sum(m.balls) AS balls, {o}, {x}
+    FROM mu_bowl m JOIN ctx_bowl c USING (format, ctx, yr, phase) CROSS JOIN grid g
+    WHERE m.yr < g.as_of AND c.balls > 0 GROUP BY ALL
+),
+league AS (SELECT as_of, role, fam, split, {ratio} FROM base GROUP BY ALL)
+SELECT b.as_of, b.role, b.pid AS player_id, b.fam, b.split, b.balls, {adj}
+FROM base b LEFT JOIN league l USING (as_of, role, fam, split)
+WHERE b.balls > 0
+ORDER BY b.as_of, b.pid, b.role, b.fam, b.split;
+"""
+
+
 EXP_COLS = ["exp_wickets", "exp_dots", "exp_ones", "exp_twos", "exp_threes", "exp_fours",
             "exp_sixes", "exp_wide_balls", "exp_noball_balls"] + [f"lexp_{c}" for c in _FORM_CATS]
 
@@ -593,10 +652,17 @@ SELECT s.pid AS id,
            WHEN s.bowl_share >= {BOWL_SHARE_MIN} THEN 'BOWL'
            ELSE 'BAT'
        END AS role,
-       NULL::VARCHAR AS batting_hand,
-       CASE WHEN coalesce(sp.wk, 0) < {SPIN_MIN_WICKETS} THEN NULL
+       nullif(sty.batting_hand, '') AS batting_hand,
+       -- Wikipedia's bowling style when there is one; otherwise guessed from
+       -- stumpings off their bowling (only spinners get batters stumped).
+       CASE WHEN nullif(sty.bowling_type, '') IS NOT NULL THEN
+                CASE WHEN sty.bowling_type IN ('off-spin', 'leg-spin', 'left-arm orthodox', 'left-arm wrist-spin')
+                     THEN 'spin' ELSE 'pace' END
+            WHEN coalesce(sp.wk, 0) < {SPIN_MIN_WICKETS} THEN NULL
             WHEN sp.st >= 1 AND sp.st >= {SPIN_STUMPED_SHARE} * sp.wk THEN 'spin'
             ELSE 'pace' END AS bowling_style,
+       nullif(sty.bowling_arm, '') AS bowling_arm,
+       nullif(sty.bowling_type, '') AS bowling_type,
        CASE WHEN coalesce(i.country, nf.country, nullif(wd.country, ''), CASE WHEN dom.pid IS NOT NULL THEN 'India' END) IS NULL
             THEN NULL
             ELSE coalesce(i.country, nf.country, nullif(wd.country, ''), CASE WHEN dom.pid IS NOT NULL THEN 'India' END) <> 'India'
@@ -612,6 +678,7 @@ FROM share s
 LEFT JOIN people p ON p.identifier = s.pid
 LEFT JOIN wd ON wd.cricinfo_id = p.key_cricinfo
 LEFT JOIN natfix nf ON nf.cricinfo_id = p.key_cricinfo
+LEFT JOIN sty ON sty.cricinfo_id = p.key_cricinfo
 LEFT JOIN stumps st ON st.pid = s.pid
 LEFT JOIN spin sp ON sp.pid = s.pid
 LEFT JOIN intl i ON i.pid = s.pid
@@ -827,6 +894,14 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
                         f"'{fixes.as_posix()}', header = true, all_varchar = true)")
         else:
             con.execute("CREATE OR REPLACE TEMP TABLE natfix (cricinfo_id VARCHAR, country VARCHAR)")
+        # Batting hand + bowling style from Wikipedia infoboxes (`gully-pipeline styles`); optional.
+        styles = names.with_name("player_styles.csv")
+        if styles.exists():
+            con.execute(f"CREATE OR REPLACE TEMP TABLE sty AS SELECT cricinfo_id, batting_hand, bowling_arm, bowling_type "
+                        f"FROM read_csv('{styles.as_posix()}', header = true, all_varchar = true)")
+        else:
+            con.execute("CREATE OR REPLACE TEMP TABLE sty (cricinfo_id VARCHAR, batting_hand VARCHAR, "
+                        "bowling_arm VARCHAR, bowling_type VARCHAR)")
         cols = {r[0] for r in con.execute("DESCRIBE wd").fetchall()}
         if "country" not in cols:   # a names file from before nationality was added
             con.execute("ALTER TABLE wd ADD COLUMN country VARCHAR")
@@ -844,11 +919,12 @@ def build(parquet_dir: Path, people_csv: Path, db_path: Path) -> dict[str, int]:
         as_ofs = sorted({min(FORM_FIRST_AS_OF, last_year + 1), *range(FORM_FIRST_AS_OF, last_year + 2)})
         con.execute(form_sql([(a, h) for a in as_ofs for h in FORM_HALF_LIVES]))
         con.execute(PLAYERS_SQL)
+        con.execute(matchup_sql(as_ofs))
         con.execute(venues_sql())
         con.execute(legends_sql(Path(__file__).resolve().parents[2] / "reference" / "legends.csv"))
         con.execute(PLAYER_TEAMS_SQL)
         con.execute(OPENING_SQL)
         tables = ["players", "player_format_stats", "player_season_stats", "player_phase_stats",
-                  "player_phase_form", "league_strength", "venues", "venue_format_stats",
+                  "player_phase_form", "player_matchups", "league_strength", "venues", "venue_format_stats",
                   "player_dismissals", "player_venue_stats", "legends", "player_teams", "player_opening"]
         return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}

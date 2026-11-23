@@ -33,7 +33,7 @@ from pathlib import Path
 
 import duckdb
 
-from gully_api.sim import Team, from_phase_rows, load_env, simulate_match
+from gully_api.sim import Team, attach_matchups, from_phase_rows, load_env, simulate_match
 from gully_api.sim.rates import CALIBRATION_PATH, PHASES
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,11 +113,13 @@ def load_matches(con, y0: int, y1: int) -> list[dict]:
 
 
 def load_profiles(con, ids: set[str], env, fmt: str = "T20",
-                  as_of: int | None = None, half_life: int = 0, league_adjusted: bool = True) -> dict:
+                  as_of: int | None = None, half_life: int = 0, league_adjusted: bool = True,
+                  matchups: bool = True) -> dict:
     """Career ratings (player_phase_stats, all data) or, with ``as_of``, point-in-time
-    form ratings from player_phase_form: only data before ``as_of``, recency-weighted."""
-    players = {r["id"]: r for r in q(con, "SELECT id, name, role FROM players WHERE id IN (SELECT unnest(?))",
-                                     [list(ids)])}
+    form ratings from player_phase_form: only data before ``as_of``, recency-weighted.
+    ``matchups``: add pace/spin and batting-hand splits (as of the same cut-off)."""
+    players = {r["id"]: r for r in q(con, "SELECT id, name, role, batting_hand, bowling_style, bowling_type "
+                                          "FROM players WHERE id IN (SELECT unnest(?))", [list(ids)])}
     rows = defaultdict(list)
     if as_of is None:
         sql = "SELECT *, player_id AS pid FROM player_phase_stats WHERE format = ? AND player_id IN (SELECT unnest(?))"
@@ -128,8 +130,17 @@ def load_profiles(con, ids: set[str], env, fmt: str = "T20",
         params = [fmt, list(ids), as_of, half_life]
     for r in q(con, sql, params):
         rows[r["pid"]].append(r)
-    return {pid: from_phase_rows(players[pid], rows[pid], env, league_adjusted)
-            for pid in ids if pid in players}
+    mu = defaultdict(list)
+    if matchups:
+        for r in q(con, "SELECT * FROM player_matchups WHERE fam = ? AND as_of = ? AND player_id IN (SELECT unnest(?))",
+                   [fmt, as_of if as_of is not None else 9999, list(ids)]):
+            mu[r["player_id"]].append(r)
+    out = {}
+    for pid in ids:
+        if pid in players:
+            prof = from_phase_rows(players[pid], rows[pid], env, league_adjusted)
+            out[pid] = attach_matchups(prof, players[pid], mu[pid]) if matchups else prof
+    return out
 
 
 def season_year(mt: dict) -> int:
@@ -282,6 +293,7 @@ def main(argv=None) -> int:
     ap.add_argument("--ratings", choices=["form", "career"], default="form",
                     help="form: point-in-time, recency-weighted (no look-ahead); career: all data")
     ap.add_argument("--half-life", type=int, default=4, help="years; 0 = no decay (form ratings)")
+    ap.add_argument("--no-matchups", action="store_true", help="ignore pace/spin and batting-hand splits")
     ap.add_argument("--no-league-adjust", action="store_true",
                     help="rate players vs their own league's average, without competition strength")
     args = ap.parse_args(argv)
@@ -300,11 +312,13 @@ def main(argv=None) -> int:
         ids = {p for m in test + fit_set for t in m["teams"].values() for p in t["xi"] + t["impact"]}
         years = {season_year(m) for m in test + fit_set}
         if args.ratings == "career":
-            career = load_profiles(con, ids, env, league_adjusted=not args.no_league_adjust)
+            career = load_profiles(con, ids, env, league_adjusted=not args.no_league_adjust,
+                                   matchups=not args.no_matchups)
             profs = {y: career for y in years}
         else:
             profs = {y: load_profiles(con, ids, env, as_of=y, half_life=args.half_life,
-                                      league_adjusted=not args.no_league_adjust) for y in years}
+                                      league_adjusted=not args.no_league_adjust,
+                                      matchups=not args.no_matchups) for y in years}
 
     if args.fit:
         print(f"Fitting calibration on {len(fit_set)} matches ({args.fit[0]}-{args.fit[1]})")
@@ -323,7 +337,8 @@ def main(argv=None) -> int:
           f"{len(test) * args.runs:,} simulated, env={args.env}, "
           f"{'calibrated' if calibrated else 'uncalibrated'}, ratings={args.ratings}"
           f"{f' (half-life {args.half_life}y)' if args.ratings == 'form' else ''}"
-          f"{', no league adjustment' if args.no_league_adjust else ', league-adjusted'}, "
+          f"{', no league adjustment' if args.no_league_adjust else ', league-adjusted'}"
+          f"{', no matchups' if args.no_matchups else ', matchups'}, "
           f"{time.perf_counter() - t0:.0f}s")
     return 0 if report(real, sim, args.tolerance) else 1
 

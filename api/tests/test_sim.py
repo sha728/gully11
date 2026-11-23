@@ -336,3 +336,40 @@ def test_odi_ties_stand(env):
     s = _tied(env, a, b)[0]
     m = simulate_match(a, b, env, s, super_over=False)
     assert m.winner is None and m.result == "tie" and not m.super_overs
+
+
+def _mu_row(split, balls, ratio_runs=1.0, ratio_w=1.0):
+    """A player_matchups row: an average player's expected counts, observed scaled."""
+    exp = {"wickets": 0.05, "dots": 0.35, "ones": 0.35, "twos": 0.07, "threes": 0.005, "fours": 0.11, "sixes": 0.065}
+    row = {"split": split, "balls": balls}
+    for c, r in exp.items():
+        row[f"x_{c}"] = r * balls
+        row[f"o_{c}"] = r * balls * (ratio_w if c == "wickets" else ratio_runs if c in ("fours", "sixes") else 1.0)
+    return row
+
+
+def test_matchup_factors_follow_big_samples_only():
+    from gully_api.sim.profiles import matchup_factors
+    # Plays pace and spin alike: no effect.
+    f = matchup_factors([_mu_row("pace", 3000), _mu_row("spin", 3000)])
+    assert all(abs(x - 1) < 1e-9 for v in f.values() for x in v)
+    # Hits far more boundaries off pace over a big sample: pace factor up, spin down.
+    f = matchup_factors([_mu_row("pace", 20000, ratio_runs=1.4), _mu_row("spin", 20000, ratio_runs=0.8)])
+    assert f["pace"][5] > 1.1 and f["spin"][5] < 0.9
+    # The same split from 60 balls barely moves.
+    f = matchup_factors([_mu_row("pace", 20000), _mu_row("spin", 60, ratio_runs=0.3)])
+    assert 0.95 < f["spin"][5] <= 1.0
+
+
+def test_matchups_change_the_ball_only_for_that_matchup(env):
+    from gully_api.sim.engine import _Match
+    a, b = avg_team("A", env), avg_team("B", env)
+    bat, bowl = a.players[0], b.players[10]
+    m = _Match(env, 1, False)
+    plain = m.combined(bat, bowl, "middle")
+    bat.bat_vs = {"spin": [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5]}
+    bowl.kind = "pace"
+    assert _Match(env, 1, False).combined(bat, bowl, "middle") == plain     # only spin is affected
+    bowl.kind = "spin"
+    vs_spin = _Match(env, 1, False).combined(bat, bowl, "middle")
+    assert vs_spin[5] < plain[5] and vs_spin[6] < plain[6] and abs(sum(vs_spin) - 1) < 1e-9

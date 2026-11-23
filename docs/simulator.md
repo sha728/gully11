@@ -170,6 +170,29 @@ and economy (McGrath 21.6 at 2.49).
   environments run uncalibrated until fitted on their own matches.
 - Free hits and DLS are not modelled yet.
 
+## Matchups (pace / spin, batting hand)
+
+Batting hand and bowling style come from each player's Wikipedia infobox
+(`gully-pipeline styles`, CC BY-SA): known for 99% of IPL balls since 2015 and 89%
+of all T20 balls. The pipeline's `player_matchups` table holds, per player, how a
+batter did against pace and against spin, and a bowler against left- and
+right-handers: observed counts next to what an average player got in the same
+matchup, competition, year and phase.
+
+Each ball multiplies the outcome odds by two factors (both 1 when unknown): the
+batter's record against this kind of bowling relative to their record overall,
+and the bowler's against this batting hand relative to theirs. A split is pulled
+toward the player's overall record with 1,500 balls of prior, so only big samples
+move: Kohli's record off spin (half the usual dismissal rate over 7,500 balls)
+counts; a 60-ball split doesn't.
+
+What it buys: realism in the individual battles more than better results. On
+2024–26 IPL balls the batter-v-bowler model, rated only on earlier data, predicts
+the actual outcome slightly better with matchups (log loss -0.04% overall, -0.15%
+on balls against spin, no kind of ball worse; `scripts/matchup_check.py`). With
+weaker shrinkage (100–400 balls) it was slightly worse: splits are noisy.
+Match-level prediction is unchanged (`validate_sim.py`, Brier within noise).
+
 ## Super over
 
 A tied T20 (IPL, T20I) goes to a super over; ODI ties stand (pass

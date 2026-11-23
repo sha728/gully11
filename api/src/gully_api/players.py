@@ -47,8 +47,10 @@ class Player(BaseModel):
     cricinfo_id: str | None
     country: str | None
     role: Role
-    batting_hand: str | None
-    bowling_style: str | None
+    batting_hand: str | None      # 'L' / 'R'
+    bowling_style: str | None     # 'pace' / 'spin'
+    bowling_arm: str | None = None
+    bowling_type: str | None = None   # e.g. 'left-arm orthodox', 'fast-medium'
     is_overseas_for_ipl: bool | None
     capped: bool
     era_start: int | None
@@ -139,7 +141,7 @@ def get_player(
     """
     player = conn.execute(
         "SELECT id, name, full_name, wikipedia_title, unique_name, cricinfo_id, country, role, batting_hand, "
-        "bowling_style, is_overseas_for_ipl, capped, era_start, era_end, matches, source "
+        "bowling_style, bowling_arm, bowling_type, is_overseas_for_ipl, capped, era_start, era_end, matches, source "
         "FROM players WHERE id = %s",
         (player_id,),
     ).fetchone()

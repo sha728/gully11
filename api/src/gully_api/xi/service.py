@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ..settings import settings
 from ..sim import captaincy
-from ..sim import Profile, Team, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
+from ..sim import Profile, Team, attach_matchups, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
 
 FULL_MEMBERS = ["India", "Australia", "England", "South Africa", "New Zealand", "Pakistan",
                 "Sri Lanka", "West Indies", "Bangladesh", "Zimbabwe", "Afghanistan", "Ireland"]
@@ -344,7 +344,8 @@ def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
             out[r["id"]] = from_legend(r, env)
     if modern_ids:
         players = {r["id"]: r for r in conn.execute(
-            "SELECT id, coalesce(full_name, name) AS name, role FROM players WHERE id = ANY(%s)",
+            "SELECT id, coalesce(full_name, name) AS name, role, batting_hand, bowling_style, bowling_type "
+            "FROM players WHERE id = ANY(%s)",
             (modern_ids,)).fetchall()}
         rows: dict[str, list] = {i: [] for i in modern_ids}
         for r in conn.execute("SELECT * FROM player_phase_stats WHERE format = %s AND player_id = ANY(%s)",
@@ -355,8 +356,12 @@ def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
         wickets = {r["player_id"]: r["wickets"] for r in conn.execute(
             "SELECT player_id, wickets FROM player_format_stats WHERE format = %s AND player_id = ANY(%s)",
             (fmt, modern_ids)).fetchall()}
+        matchups: dict[str, list] = {i: [] for i in modern_ids}
+        for r in conn.execute("SELECT * FROM player_matchups WHERE fam = %s AND player_id = ANY(%s)",
+                              (spec.stats, modern_ids)).fetchall():
+            matchups[r["player_id"]].append(r)
         for pid, p in players.items():
-            out[pid] = from_phase_rows(p, rows[pid], env)
+            out[pid] = attach_matchups(from_phase_rows(p, rows[pid], env), p, matchups[pid])
             out[pid].wickets = wickets.get(pid) or 0
     missing = set(ids) - set(out)
     if missing:

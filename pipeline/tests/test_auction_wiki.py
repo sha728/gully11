@@ -64,3 +64,83 @@ def test_parse_retentions_sets_and_accelerated_round():
                      "team": "KKR", "price_lakh": 2520, "prev_team": None}
     assert miller["article"] == "David Miller (South African cricketer)" and miller["prev_team"] == "LSG"
     assert dwarshuis["set"] == "ACC" and dwarshuis["role"] == "AR" and dwarshuis["price_lakh"] == 440
+
+
+MARQUEE = """
+{| class="wikitable sortable plainrowheaders"
+|+ Set 1: marquee players (M1)
+! scope="col" | No.
+! scope="col" | Name
+! scope="col" | Country
+! scope="col" | Role
+! scope="col" | No. of IPL matches
+! scope="col" | Category
+! scope="col" | Base price
+! scope="col" | 2025 IPL team
+! scope="col" | Auctioned price
+! scope="col" | 2024 IPL team
+|-
+| 3*
+! scope="row" | {{sortname|Rishabh|Pant}}
+| {{cr|IND}} || Batter || 111 || Capped || 200 || [[Lucknow Super Giants]] || 2700 || [[Delhi Capitals]]
+|}
+"""
+
+PAGE_2024 = """
+{| class="wikitable"
+! S.No.
+! Set No.
+! Set
+! Name
+! Country
+! Playing Role
+! IPL Matches
+! Capped / Uncapped / Associate
+! Base Price
+! [[2024 Indian Premier League|IPL 2024]] Team
+! Auctioned Price
+! [[2023 Indian Premier League|IPL 2023]] Team
+! Previous IPL Team(s)
+|-
+| 2
+| 1
+| BA1
+| [[Travis Head]]
+| {{cricon|AUS}}
+| Batsman
+| 10
+| Capped
+| 200
+| [[Sunrisers Hyderabad]]
+| 680
+| {{N/a}}
+| [[Royal Challengers Bengaluru]]
+|-
+| 78
+| {{ref label|rounding|ACC-1|ACC}}
+| [[Sherfane Rutherford]]
+| {{cr|WIN}}
+| Batsman
+| 10
+| Capped
+| 150
+| [[Kolkata Knight Riders]]
+| 150
+| {{N/a}}
+| [[Delhi Capitals]]
+|}
+"""
+
+
+def test_marquee_sets_list_the_role_and_lot_numbers_may_carry_a_footnote_mark():
+    _, sold = parse(MARQUEE)
+    assert [(s["no"], s["set"], s["role"], s["price_lakh"], s["team"]) for s in sold] == [(3, "M1", "BAT", 2700, "LSG")]
+
+
+def test_parse_2024_table_including_accelerated_rows_without_a_set_number():
+    from gully_pipeline.auction_wiki import parse_2024
+    sold = parse_2024(PAGE_2024)
+    assert [(s["no"], s["set"], s["name"], s["role"], s["base_lakh"], s["price_lakh"], s["team"]) for s in sold] == [
+        (2, "BA1", "Travis Head", "BAT", 200, 680, "SRH"),
+        (78, "ACC", "Sherfane Rutherford", "BAT", 150, 150, "KKR"),
+    ]

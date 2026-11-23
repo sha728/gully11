@@ -138,7 +138,7 @@ def _z(xs: list[float]) -> tuple[float, float]:
     return m, sd
 
 
-def values(rows: list[dict]) -> list[float]:
+def values(rows: list[dict], latest: int = 2026) -> list[float]:
     """Each skill scored against the specialists in it (batting against batters and
     keepers, bowling against bowlers), so a top bowler is worth as much as a top
     batter. All-rounders add 60% of their weaker skill when it's above average.
@@ -159,7 +159,7 @@ def values(rows: list[dict]) -> list[float]:
         v += 0.3 if role == "WK" else 0.0
         m = (r["m"] or 0) + CAREER_WEIGHT * (r["c_m"] or 0)
         v *= m / (m + 20)                                     # proven, not a few good weeks
-        v *= {"2026": 1.0, "2025": 0.92}.get(r["last_ipl"], 0.85)
+        v *= {str(latest): 1.0, str(latest - 1): 0.92}.get(r["last_ipl"], 0.85)
         out.append(v)
     # Reputation: franchises pay for proven names, not only this year's numbers.
     rep = [math.log1p(r["ipl_career"]) + 0.5 * math.log1p(r["t20i_career"]) for r in rows]
@@ -217,17 +217,23 @@ def pool_size(teams: int) -> int:
     return teams * RULES["mega"]["squad_max"] + 20
 
 
-def _rated(conn, extra: list[str] = (), before: str | None = None) -> list[dict]:
+def _rated(conn, extra: list[str] = (), before: str | None = None, rolling: bool = False) -> list[dict]:
     """Every player from the last three IPL seasons (plus ``extra`` ids), with
     nationality fixes and a value, best first. Values are scored across this whole
     population, so a player's rating doesn't depend on who else is in a room.
-    ``before``: count only seasons before this label (a replayed auction)."""
-    rows = conn.execute(_SQL, {"seasons": list(POOL_SEASONS), "form_from": FORM_FROM,
+    ``before``: count only seasons before this label (a replayed auction).
+    ``rolling``: as for a past auction, the three seasons before ``before`` are the
+    ones that count (the 2026 settings otherwise), so any year can be replayed."""
+    latest, seasons, form_from = 2026, list(POOL_SEASONS), FORM_FROM
+    if before is not None and rolling:
+        latest = int(before[:4]) - 1
+        seasons, form_from = [str(y) for y in range(latest - 2, latest + 1)], latest - 2
+    rows = conn.execute(_SQL, {"seasons": seasons, "form_from": form_from,
                                "extra": list(extra), "before": before}).fetchall()
     fixes = _overrides()
     rows = [{**r, **({**fixes[r["id"]], "is_overseas_for_ipl": fixes[r["id"]]["country"] != "India"}
                      if r["id"] in fixes else {})} for r in rows]
-    players = [{**r, "overseas": overseas(r), "value": v} for r, v in zip(rows, values(rows))]
+    players = [{**r, "overseas": overseas(r), "value": v} for r, v in zip(rows, values(rows, latest))]
     players.sort(key=lambda p: (-p["value"], p["id"]))
     return players
 

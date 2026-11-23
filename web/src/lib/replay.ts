@@ -32,7 +32,7 @@ export interface LiveState {
   thisOver: string[];
   partnership: { runs: number; balls: number };
   target: number | null;
-  need: { runs: number; balls: number } | null;
+  need: { runs: number; balls: number | null } | null;   // balls is null in a Test
   lastWicket: string | null;
   ended: boolean;
 }
@@ -127,7 +127,8 @@ export function liveState(match: FullMatch, cursor: number, ballsPerInnings: num
     thisOver,
     partnership: { runs: pRuns, balls: pBalls },
     target,
-    need: target && perInnings ? { runs: Math.max(0, target - runs), balls: Math.max(0, perInnings - legalBalls) } : null,
+    // A Test chase has no ball limit, only the runs still needed.
+    need: target ? { runs: Math.max(0, target - runs), balls: perInnings ? Math.max(0, perInnings - legalBalls) : null } : null,
     lastWicket,
     ended,
   };

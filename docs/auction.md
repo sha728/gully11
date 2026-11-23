@@ -28,8 +28,32 @@ number of franchises (25 per team + 20). Afghanistan's players (no Cricsheet
 country) now get one from the pipeline (Wikidata, see README "Nationality");
 `nationality.csv` still pins their country and capped status for the auction.
 
-This is a stats estimate, not trained on auction history; the planned price model
-replaces `values()` once a licensed price history exists.
+### Is there a price model to learn? (`scripts/price_check.py`)
+
+`gully-pipeline auction-history` reads who was sold for how much at the 2024 and
+2025 auctions from Wikipedia (`ipl_auction_history.csv`, 252 sales; with the 2026
+sales that is 302 with a known player). Each player is described by what was
+known before that auction and a price model is fitted on two years and tested on
+the third:
+
+| Features | Share of price variance explained | Typical miss |
+| --- | --- | --- |
+| rank by `value` (the game today) | 19% | ×3.5 |
+| `value` plus role, capped, overseas | 29% | ×3.2 |
+| role, capped, overseas and the base price | 36% | ×3.0 |
+
+Two things came out of it. Franchises pay for much that stats don't show (a
+bidding war, team needs, age, who they just lost), so about two thirds of
+the price stays unexplained whatever we add, and base price, which is itself the
+market's guess, adds more than form does. And the fitted model is worse for the
+game than the current method: regression flattens the stars (a ₹27 cr player
+comes out at ₹2.6 cr), while ranking by `value` and pricing the rank on a curve
+orders sold players as well as anything we tried (Spearman 0.44, 0.66 and 0.43
+for the three auctions, against 0.35–0.69 for the fitted models). So fair prices
+still come from `values()` and the curve, which keeps stars dear and always
+adds up to the room's money; the history is here for checking them. It also shows
+real auctions are far noisier than the all-bot ones in the game (bots value a
+player at 0.65–1.15× fair; real prices scatter by a factor of about three).
 
 ## Room flow (`room.py`, `live.py`)
 

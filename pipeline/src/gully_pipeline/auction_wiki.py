@@ -124,30 +124,66 @@ def parse(wikitext: str) -> tuple[list[dict], list[dict]]:
             continue
         m = re.search(r"\(([A-Z]+)(\d+)\)", caption)
         accelerated = caption.lower().startswith("accelerated")
+        with_role = bool(re.search(r"^!.*\|\s*Role\s*$", body, flags=re.M))   # marquee sets list the role
         if not (m or accelerated):
             continue
         for row in rows:
             c = _cells(row)
             if len(c) < 7 or not (who := _person(c[1])):
                 continue
-            no = int(c[0].strip_code().strip())
-            if accelerated:
+            no = int(re.match(r"\d+", c[0].strip_code().strip()).group())
+            if accelerated or with_role:
                 role_text = c[3].strip_code().strip().lower()
                 capped = c[5].strip_code().strip().lower() == "capped"
                 base, team, price = _lakh(c[6]), _team(c[7]), _lakh(c[8])
                 prev = _team(c[9]) if len(c) > 9 else None
-                set_code, role = "ACC", ACC_ROLE.get(role_text)
+                set_code = "ACC" if accelerated else f"{m.group(1)}{m.group(2)}"
+                role = ACC_ROLE.get(role_text)
             else:
                 code = m.group(1)
                 capped = not code.startswith("U")
                 base, team, price = _lakh(c[4]), _team(c[5]), _lakh(c[6])
                 prev = _team(c[7]) if len(c) > 7 else None
-                set_code, role = f"{code}{m.group(2)}", SET_ROLE[code.lstrip("U")]
+                set_code, role = f"{code}{m.group(2)}", SET_ROLE.get(code.lstrip("U"))
             sold.append({"no": no, "set": set_code, **who, "country": _country(c[2]), "role": role,
                          "capped": capped, "base_lakh": base, "team": team, "price_lakh": price,
                          "prev_team": prev})
     sold.sort(key=lambda r: r["no"])
     return retained, sold
+
+
+def _link_person(cell) -> dict | None:
+    """A player written as a plain wikilink: ``[[Harry Brook]]`` or ``[[A (cricketer)|A]]``."""
+    links = cell.filter_wikilinks()
+    if links:
+        article = str(links[0].title).strip()
+        text = str(links[0].text).strip() if links[0].text else article
+        return {"name": re.sub(r"\s*\(.*?\)$", "", text), "article": article}
+    text = cell.strip_code().strip()
+    return {"name": text, "article": text} if text else None
+
+
+def parse_2024(wikitext: str) -> list[dict]:
+    """The 2024 auction: one wide table of everyone sold, with the set in its own column."""
+    sold = []
+    for _caption, body in _tables(wikitext):
+        if "Auctioned Price" not in body:
+            continue
+        for row in re.split(r"\n\|-[^\n]*", body)[1:]:
+            c = _cells(row)
+            if len(c) >= 11 and _country(c[3]) and not _country(c[4]):   # accelerated round: no "set no." cell
+                c = [c[0], c[0], mwp.parse("ACC"), *c[2:]]
+            if len(c) < 11 or not (who := _link_person(c[3])):
+                continue
+            set_code = c[2].strip_code().strip()
+            sold.append({"no": int(re.match(r"\d+", c[0].strip_code().strip()).group()), "set": set_code,
+                         **who, "country": _country(c[4]),
+                         "role": ACC_ROLE.get(c[5].strip_code().strip().lower(),
+                                              "BAT" if c[5].strip_code().strip().lower() == "batsman" else None),
+                         "capped": c[7].strip_code().strip().lower() == "capped",
+                         "base_lakh": _lakh(c[8]), "team": _team(c[9]), "price_lakh": _lakh(c[10])})
+    sold.sort(key=lambda r: r["no"])
+    return sold
 
 
 def match(rows: list[dict], db_path: Path = DB_PATH) -> list[str]:
@@ -202,6 +238,29 @@ def _write(path: Path, rows: list[dict], cols: list[str], revid: int) -> None:
         w.writeheader()
         for r in rows:
             w.writerow({**r, "source": f"https://en.wikipedia.org/w/index.php?oldid={revid}"})
+
+
+HISTORY_CSV = OUT_DIR / "ipl_auction_history.csv"
+HISTORY_COLS = ["year", "no", "set", "name", "country", "role", "capped", "base_lakh", "team",
+                "price_lakh", "player_id"]
+
+
+def build_history() -> dict:
+    """Everyone sold at the 2024 and 2025 auctions (the 2026 one is ``ipl2026_auction.csv``),
+    for fitting the auction game's price model."""
+    pages = {y: fetch_wikitext([f"List of {y} Indian Premier League personnel changes"])
+             [f"List of {y} Indian Premier League personnel changes"] for y in (2024, 2025)}
+    rows = []
+    for year, page in pages.items():
+        sold = parse_2024(page["wikitext"]) if year == 2024 else parse(page["wikitext"])[1]
+        missing = match(sold)
+        for r in sold:
+            rows.append({**r, "year": year, "source": f"https://en.wikipedia.org/w/index.php?oldid={page['revid']}"})
+    with HISTORY_CSV.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=HISTORY_COLS + ["source"], extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    return {"rows": rows, "missing": [r["name"] for r in rows if not r["player_id"]]}
 
 
 def build() -> dict:

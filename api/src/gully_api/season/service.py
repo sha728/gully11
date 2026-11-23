@@ -70,7 +70,7 @@ def squads(conn, room: dict) -> dict[str, dict]:
     env = load_env(xi.FORMATS[FORMAT].env)
     all_ids = [s["id"] for f in room["result"]["franchises"] for s in f["squad"]]
     known = {r["id"] for r in conn.execute("SELECT id FROM players WHERE id = ANY(%s)", (all_ids,)).fetchall()}
-    prof = xi.profiles(conn, FORMAT, sorted(known)) if known else {}
+    prof = xi.profiles(conn, FORMAT, sorted(known), recent=True) if known else {}
     opened = {r["player_id"]: r for r in conn.execute(
         "SELECT player_id, innings, opened FROM player_opening WHERE format = 'T20' AND player_id = ANY(%s)",
         (sorted(known),)).fetchall()}

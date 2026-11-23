@@ -325,7 +325,7 @@ def test_super_over_settles_ties(env):
         for inn in so:
             assert inn.legal_balls <= 6 and inn.wickets <= 2
             assert sum(1 for line in inn.bat.values() if line.how_out) <= 3
-            assert len([b for b in inn.bowl.values() if b.balls]) == 1
+            assert len([b for b in inn.bowl.values() if b.balls or b.runs]) == 1   # a wide can win a chase of 1
         assert {e["inns"] for e in m.commentary} >= {3, 4}
         d = m.to_dict()
         assert len(d["super_overs"]) == len(so) and len(d["innings"]) == 2
@@ -365,11 +365,28 @@ def test_matchups_change_the_ball_only_for_that_matchup(env):
     from gully_api.sim.engine import _Match
     a, b = avg_team("A", env), avg_team("B", env)
     bat, bowl = a.players[0], b.players[10]
-    m = _Match(env, 1, False)
-    plain = m.combined(bat, bowl, "middle")
-    bat.bat_vs = {"spin": [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5]}
+    for kind in ("pace", "spin"):
+        bowl.kind, bat.bat_vs = kind, {}
+        plain = _Match(env, 1, False).combined(bat, bowl, "middle")
+        bat.bat_vs = {"spin": [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5]}
+        with_mu = _Match(env, 1, False).combined(bat, bowl, "middle")
+        if kind == "pace":
+            assert with_mu == plain                                       # only spin is affected
+        else:
+            assert with_mu[5] < plain[5] and with_mu[6] < plain[6] and abs(sum(with_mu) - 1) < 1e-9
+
+
+def test_calibration_by_bowling_kind(env):
+    from gully_api.sim.engine import _Match
+    a, b = avg_team("A", env), avg_team("B", env)
+    bat, bowl = a.players[0], b.players[10]
+    cal = {p: (1.0,) * 7 for p in ("PP", "middle", "death")}
+    cal["middle:spin"] = (2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    e = env.with_calibration(cal, 0.0)
     bowl.kind = "pace"
-    assert _Match(env, 1, False).combined(bat, bowl, "middle") == plain     # only spin is affected
+    pace = _Match(e, 1, False).combined(bat, bowl, "middle")
     bowl.kind = "spin"
-    vs_spin = _Match(env, 1, False).combined(bat, bowl, "middle")
-    assert vs_spin[5] < plain[5] and vs_spin[6] < plain[6] and abs(sum(vs_spin) - 1) < 1e-9
+    spin = _Match(e, 1, False).combined(bat, bowl, "middle")
+    bowl.kind = None
+    unknown = _Match(e, 1, False).combined(bat, bowl, "middle")
+    assert spin[0] > 1.8 * pace[0] and unknown == pace       # no spin cell for others: per-phase values

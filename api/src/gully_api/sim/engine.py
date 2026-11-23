@@ -120,6 +120,8 @@ class Innings:
     # phase -> counts over OUTCOMES for balls faced (used by calibration/validation)
     outcomes: dict[str, list[int]] = field(
         default_factory=lambda: {p: [0] * 7 for p in ("PP", "middle", "death")})
+    # The same by bowling kind: "death:pace", "middle:spin", ... (known kinds only)
+    kind_outcomes: dict[str, list[int]] = field(default_factory=dict)
 
     @property
     def overs(self) -> str:
@@ -235,7 +237,8 @@ class _Match:
         if v is None:
             env = self.env
             br, wr = bat.bat_ratio(phase, env), bowl.bowl_ratio(phase, env)
-            cal = env.calibration[phase]
+            # Calibration per phase and bowling kind where fitted, else per phase.
+            cal = env.calibration.get(f"{phase}:{bowl.kind}") or env.calibration[phase]
             raw = [br[i] * wr[i] * env.bat_env[phase][i] * cal[i] for i in range(7)]
             # Matchups: this batter against this kind of bowling, this bowler
             # against this batting hand (factors are 1 when unknown).
@@ -410,6 +413,8 @@ class _Match:
                     o = _pick(rng, v)
                     line.balls += 1
                     inn.outcomes[phase][1 if (noball and o == 0) else o] += 1
+                    if bowler.kind:
+                        inn.kind_outcomes.setdefault(f"{phase}:{bowler.kind}", [0] * 7)[1 if (noball and o == 0) else o] += 1
                     if noball:
                         r = RUNS[o]  # wicket outcomes become dots: can't be out (bar run out)
                         inn.runs += 1 + r

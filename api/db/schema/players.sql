@@ -4,7 +4,7 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Children before parents (foreign keys).
-DROP TABLE IF EXISTS player_opening, legends, player_teams,
+DROP TABLE IF EXISTS player_matchups, player_opening, legends, player_teams,
     player_venue_stats, player_dismissals, venue_format_stats, venues,
     player_phase_form, player_phase_stats, player_season_stats, player_format_stats, players;
 
@@ -18,8 +18,10 @@ CREATE TABLE players (
     wikipedia_title     text,
     country             text,
     role                text NOT NULL CHECK (role IN ('BAT', 'BOWL', 'AR', 'WK')),
-    batting_hand        text,
-    bowling_style       text,              -- 'spin' / 'pace', from stumpings off their bowling
+    batting_hand        text,              -- 'L' / 'R', from Wikipedia's infobox
+    bowling_style       text,              -- 'spin' / 'pace': Wikipedia, else from stumpings off their bowling
+    bowling_arm         text,              -- 'L' / 'R'
+    bowling_type        text,              -- fast / fast-medium / medium / off-spin / leg-spin / left-arm orthodox / left-arm wrist-spin
     is_overseas_for_ipl boolean,
     capped              boolean NOT NULL,
     era_start           integer,
@@ -155,6 +157,23 @@ CREATE TABLE player_phase_form (
     lexp_fours          double precision,
     lexp_sixes          double precision,
     PRIMARY KEY (player_id, format, phase, role)
+);
+
+-- Matchups: a batter against pace / spin (split = bowling_style), a bowler against
+-- left- / right-handers (split = batting_hand). o_* observed, x_* what an average
+-- player got in the same matchup and context; o/x > 1 = above average. All data
+-- (the per-season cut-offs used in validation stay in DuckDB).
+CREATE TABLE player_matchups (
+    player_id   text NOT NULL REFERENCES players (id),
+    role        text NOT NULL,              -- 'bat' / 'bowl'
+    fam         text NOT NULL,              -- 'T20' / 'ODI' / 'Test'
+    split       text NOT NULL,              -- 'pace' / 'spin' (bat), 'L' / 'R' (bowl)
+    balls       double precision NOT NULL,
+    o_wickets double precision, o_dots double precision, o_ones double precision, o_twos double precision,
+    o_threes double precision, o_fours double precision, o_sixes double precision,
+    x_wickets double precision, x_dots double precision, x_ones double precision, x_twos double precision,
+    x_threes double precision, x_fours double precision, x_sixes double precision,
+    PRIMARY KEY (player_id, role, fam, split)
 );
 
 CREATE INDEX players_name_trgm ON players USING gin (name gin_trgm_ops);

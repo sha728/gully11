@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("names", help="Fetch full names + Wikipedia titles from Wikidata")
     sub.add_parser("auction2026", help="IPL 2026 auction + retentions from Wikipedia (mini mode)")
     sub.add_parser("captains", help="Captaincy records from Wikipedia (Test/ODI/T20I/IPL)")
+    sub.add_parser("styles", help="Batting hand + bowling style from Wikipedia infoboxes (needs a build)")
 
     args = p.parse_args(argv)
 
@@ -64,6 +65,15 @@ def main(argv: list[str] | None = None) -> None:
         print("  per team bought:", dict(Counter(r["team"] for r in res["sold"])))
         if res["missing"]:
             print(f"  not matched to a player id ({len(res['missing'])}): {res['missing']}")
+        return
+
+    if args.cmd == "styles":
+        from .styles import STYLES_CSV, fetch_styles
+        if not DB_PATH.exists():
+            p.error(f"{DB_PATH} not found; run `build` first")
+        res = fetch_styles(DB_PATH)
+        print(f"{res['with_styles']:,} players from {res['articles']:,} articles -> {STYLES_CSV}")
+        print(f"  batting hand: {res['batting_hand']:,} · bowling type: {res['bowling_type']:,}")
         return
 
     if args.cmd == "names":

@@ -95,8 +95,8 @@ export default async function PlayerPage({ params, searchParams }: Props) {
                 <span className="font-mono text-xs">{player.name} on the scorecard</span>
               )}
               <Badge variant="outline" className="font-mono text-[10px] uppercase">{player.capped ? "International" : "Uncapped"}</Badge>
-              {player.batting_hand && <Badge variant="outline">{player.batting_hand}</Badge>}
-              {player.bowling_style && <Badge variant="outline">{player.bowling_style}</Badge>}
+              {player.batting_hand && <Badge variant="outline">{player.batting_hand === "L" ? "Left-hand bat" : "Right-hand bat"}</Badge>}
+              {(player.bowling_type || player.bowling_style) && <Badge variant="outline">{bowlingText(player)}</Badge>}
             </div>
           }
           actions={format && (
@@ -302,4 +302,13 @@ function Career({ formats, active }: { formats: FormatStats[]; active?: Format }
       </p>
     </div>
   );
+}
+
+/** "Right-arm fast-medium", "Slow left-arm orthodox", "Leg-spin"; else "Pace" / "Spin". */
+function bowlingText(p: { bowling_type?: string | null; bowling_arm?: string | null; bowling_style: string | null }): string {
+  const t = p.bowling_type;
+  if (!t) return p.bowling_style === "spin" ? "Spin" : "Pace";
+  if (t.startsWith("left-arm")) return t === "left-arm orthodox" ? "Slow left-arm orthodox" : "Left-arm wrist-spin";
+  if (t === "off-spin" || t === "leg-spin") return t === "off-spin" ? "Off-spin" : "Leg-spin";
+  return `${p.bowling_arm === "L" ? "Left" : "Right"}-arm ${t}`;
 }

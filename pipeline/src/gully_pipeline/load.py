@@ -29,6 +29,7 @@ TABLES = {
         SELECT * EXCLUDE (pid), pid AS player_id FROM player_phase_form
         WHERE as_of = (SELECT max(as_of) FROM player_phase_form)
           AND half_life = {DEFAULT_HALF_LIFE}""",
+    "player_matchups": "SELECT * EXCLUDE (as_of) FROM player_matchups WHERE as_of = 9999",
     "venues": "SELECT * FROM venues",
     "venue_format_stats": "SELECT * FROM venue_format_stats",
     "player_dismissals": "SELECT * FROM player_dismissals",

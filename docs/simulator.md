@@ -170,6 +170,65 @@ and economy (McGrath 21.6 at 2.49).
   environments run uncalibrated until fitted on their own matches.
 - Free hits and DLS are not modelled yet.
 
+## Matchups (pace / spin, batting hand)
+
+Batting hand and bowling style come from each player's Wikipedia infobox
+(`gully-pipeline styles`, CC BY-SA): known for 99% of IPL balls since 2015 and 89%
+of all T20 balls. The pipeline's `player_matchups` table holds, per player, how a
+batter did against pace and against spin, and a bowler against left- and
+right-handers: observed counts next to what an average player got in the same
+matchup, competition, year and phase.
+
+Each ball multiplies the outcome odds by two factors (both 1 when unknown): the
+batter's record against this kind of bowling relative to their record overall,
+and the bowler's against this batting hand relative to theirs. A split is pulled
+toward the player's overall record with 1,500 balls of prior, so only big samples
+move: Kohli's record off spin (half the usual dismissal rate over 7,500 balls)
+counts; a 60-ball split doesn't.
+
+What it buys: realism in the individual battles more than better results. On
+2024–26 IPL balls the batter-v-bowler model, rated only on earlier data, predicts
+the actual outcome slightly better with matchups (log loss -0.04% overall, -0.15%
+on balls against spin, no kind of ball worse; `scripts/matchup_check.py`). With
+weaker shrinkage (100–400 balls) it was slightly worse: splits are noisy.
+Match-level prediction is unchanged (`validate_sim.py`, Brier within noise).
+
+## Calibration by phase and bowling kind; in-season form
+
+**Calibration** multiplies outcome odds so simulated IPL matches reproduce real
+ones. It is now fitted per phase *and* bowling kind ("death:pace", "middle:spin",
+...) where a cell has 1,000+ real balls, falling back to per phase. Per phase
+alone left pace at the death 6% too expensive (1.83 runs a ball v 1.73 real,
+2024-26) and spin at the death taking too many wickets, because one death
+multiplier had to serve both. Fitted on 2024-25 and tested on 2026 (unseen),
+death-over pace moved from 1.84 to 1.78 runs a ball (2026 real: 1.68); the rest
+of that gap is 2026 itself, a lower-scoring death and higher-scoring powerplay
+than the years it was fitted on. `validate_sim.py` prints the table by phase and kind.
+
+**In-season form.** Ratings as of a season's start miss breakouts and slumps
+during it. `validate_sim.py --in-season W` rates each match on form before the
+season plus every T20 ball the player played earlier that year (weight W, judged
+against the previous year's league averages: no look-ahead). Scored ball by ball
+on IPL 2024-26 (`scripts/rating_check.py`):
+
+| ratings | log loss / ball | batter SR correlation | mean SR miss |
+|---|---|---|---|
+| start of season | 1.4950 | 0.52 | 13.6 |
+| + season so far, x1 | **1.4945** | **0.66** | **12.2** |
+| + season so far, x2 | 1.4959 | 0.71 | 11.4 |
+| + season so far, x3 | 1.4982 | 0.74 | 10.9 |
+
+Weight 1 improves both; heavier weights track batters' strike rates better but
+predict individual balls worse (they overreact to small samples). Match-level
+Brier can't tell these apart: 213 results are too noisy, and the engine is still
+no better than a coin flip at naming winners (see below).
+
+**In the app:** auction seasons now rate players on current form
+(`player_phase_form`: recency-weighted, half-life 4 years, this year at full
+weight) instead of their whole career, which tracked breakouts worst of all. The
+XI Builder keeps career ratings: it drafts by era, and form would fade a 2010
+great toward average.
+
 ## Super over
 
 A tied T20 (IPL, T20I) goes to a super over; ODI ties stand (pass

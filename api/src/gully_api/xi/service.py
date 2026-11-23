@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ..settings import settings
 from ..sim import captaincy
-from ..sim import Profile, Team, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
+from ..sim import Profile, Team, attach_matchups, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
 
 FULL_MEMBERS = ["India", "Australia", "England", "South Africa", "New Zealand", "Pakistan",
                 "Sri Lanka", "West Indies", "Bangladesh", "Zimbabwe", "Afghanistan", "Ireland"]
@@ -330,9 +330,14 @@ def check_rules(fmt: str, rows: list[dict]) -> None:
             raise DraftError(f"IPL sides can field at most {MAX_OVERSEAS_IPL} overseas players.")
 
 
-def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
+def profiles(conn, fmt: str, ids: list[str], recent: bool = False) -> dict[str, Profile]:
     """Simulator profiles: career phase stats for modern players (league-adjusted),
-    career figures for legends."""
+    career figures for legends. ``recent``: rate on current form instead
+    (player_phase_form: the last few seasons weighted toward the latest, this year
+    included), for today's squads (auction seasons). Ball-level checks on IPL
+    2024-26 (scripts/rating_check.py) track batters' strike rates far better with
+    recent form than with the whole career. The XI Builder keeps career ratings:
+    it drafts players by era, and form would fade a 2010 great toward average."""
     spec = FORMATS[fmt]
     env = load_env(spec.env)
     out: dict[str, Profile] = {}
@@ -344,10 +349,12 @@ def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
             out[r["id"]] = from_legend(r, env)
     if modern_ids:
         players = {r["id"]: r for r in conn.execute(
-            "SELECT id, coalesce(full_name, name) AS name, role FROM players WHERE id = ANY(%s)",
+            "SELECT id, coalesce(full_name, name) AS name, role, batting_hand, bowling_style, bowling_type "
+            "FROM players WHERE id = ANY(%s)",
             (modern_ids,)).fetchall()}
         rows: dict[str, list] = {i: [] for i in modern_ids}
-        for r in conn.execute("SELECT * FROM player_phase_stats WHERE format = %s AND player_id = ANY(%s)",
+        table = "player_phase_form" if recent else "player_phase_stats"
+        for r in conn.execute(f"SELECT * FROM {table} WHERE format = %s AND player_id = ANY(%s)",
                               (spec.stats, modern_ids)).fetchall():
             rows[r["player_id"]].append(r)
         # Phase stats cover the format family (all T20s for the IPL); a part-timer's
@@ -355,8 +362,12 @@ def profiles(conn, fmt: str, ids: list[str]) -> dict[str, Profile]:
         wickets = {r["player_id"]: r["wickets"] for r in conn.execute(
             "SELECT player_id, wickets FROM player_format_stats WHERE format = %s AND player_id = ANY(%s)",
             (fmt, modern_ids)).fetchall()}
+        matchups: dict[str, list] = {i: [] for i in modern_ids}
+        for r in conn.execute("SELECT * FROM player_matchups WHERE fam = %s AND player_id = ANY(%s)",
+                              (spec.stats, modern_ids)).fetchall():
+            matchups[r["player_id"]].append(r)
         for pid, p in players.items():
-            out[pid] = from_phase_rows(p, rows[pid], env)
+            out[pid] = attach_matchups(from_phase_rows(p, rows[pid], env), p, matchups[pid])
             out[pid].wickets = wickets.get(pid) or 0
     missing = set(ids) - set(out)
     if missing:

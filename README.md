@@ -31,6 +31,7 @@ uv run gully-pipeline load                       # -> Postgres (drops + reloads 
 uv run gully-pipeline spotcheck                  # recount 10 players from raw JSON, diff vs tables
 uv run gully-pipeline legends                    # rebuild reference/legends.csv (needs WIKIMEDIA_CONTACT)
 uv run gully-pipeline names                      # full names + nationality from Wikidata -> reference/ (needs WIKIMEDIA_CONTACT)
+uv run gully-pipeline styles                     # batting hand + bowling style from Wikipedia -> reference/ (needs a build; rebuild after)
 uv run gully-pipeline simbase                    # simulator base rates -> api/src/gully_api/sim/data/
 uv run gully-pipeline auction2026                 # IPL 2026 auction + retentions from Wikipedia (needs WIKIMEDIA_CONTACT)
 uv run pytest

@@ -119,6 +119,8 @@ export interface PlayerProfile {
     role: Role;
     batting_hand: string | null;
     bowling_style: string | null;
+    bowling_arm?: string | null;
+    bowling_type?: string | null;
     capped: boolean;
     era_start: number | null;
     era_end: number | null;

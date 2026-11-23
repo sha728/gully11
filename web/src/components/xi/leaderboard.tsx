@@ -86,10 +86,10 @@ function Table({ rows }: { rows: BoardRow[] }) {
   return (
     <div className="overflow-x-auto border-y">
       <table className="w-full min-w-[30rem] font-mono text-sm tnum">
-        <colgroup><col className="w-14" /><col /><col className="w-28" /><col className="w-16" /><col className="w-20" /><col className="w-20" /></colgroup>
+        <colgroup><col className="w-14" /><col /><col className="w-32" /><col className="w-20" /><col className="w-32" /><col className="w-20" /></colgroup>
         <thead>
           <tr className="label border-b text-left [&>th]:h-9 [&>th]:px-2 [&>th]:font-normal">
-            <th>#</th><th>Player</th><th>Series</th><th className="text-right">Pts</th><th className="text-right">Runs ±</th><th />
+            <th>#</th><th>Player</th><th>Series</th><th className="text-right">Pts</th><th className="pr-6! text-right">Runs ±</th><th />
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -102,7 +102,7 @@ function Table({ rows }: { rows: BoardRow[] }) {
               </td>
               <td>{recordText(r)}</td>
               <td className="text-right font-semibold">{r.points}</td>
-              <td className={cn("text-right", r.run_diff < 0 && "text-muted-foreground")}>{signed(r.run_diff)}</td>
+              <td className={cn("pr-6! text-right", r.run_diff < 0 && "text-muted-foreground")}>{signed(r.run_diff)}</td>
               <td className="text-right"><Link href={`/xi/c/${r.slug}`} className="text-xs text-muted-foreground hover:text-signal">XI →</Link></td>
             </tr>
           ))}

@@ -121,7 +121,7 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
           {revealed && !isTest && <TabsTrigger value="worm" className="font-mono text-xs uppercase">Worm</TabsTrigger>}
         </TabsList>
         <TabsContent value="replay">
-          <Replay match={match} isTest={isTest} ballsPerInnings={BALLS[format] ?? 120} who={who} live={live}
+          <Replay match={match} isTest={isTest} ballsPerInnings={format in BALLS ? BALLS[format] : 120} who={who} live={live}
             cursor={cursor} setCursor={setCursor} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} />
         </TabsContent>
         {revealed && (
@@ -265,7 +265,7 @@ function Board({ state: s, who, isTest, winProb, firstBatting, secondBatting, su
           </div>
           <div className="mt-1 font-mono text-xs opacity-70">
             {s.started ? `${s.overs} ${s.overs === "1" ? "over" : "overs"}` : "yet to start"}
-            {s.need && s.started ? ` · need ${s.need.runs} from ${s.need.balls}` : ""}
+            {s.need && s.started ? ` · need ${s.need.runs}${s.need.balls == null ? "" : ` from ${s.need.balls}`}` : ""}
             {isTest && s.target ? ` · target ${s.target}` : ""}
           </div>
         </div>

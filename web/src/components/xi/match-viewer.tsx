@@ -108,6 +108,9 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
             Toss: {who(match.toss.winner)} won it{match.toss.captain ? ` (captain ${match.toss.captain})` : ""} and chose to {match.toss.decision} first.
           </p>
         )}
+        {revealed && match.result === "draw" && match.margin.includes(": ") && (
+          <p className="mt-1 font-mono text-xs text-muted-foreground">Drawn: {match.margin.split(": ")[1]}.</p>
+        )}
       </div>
 
       {revealed && live && after}

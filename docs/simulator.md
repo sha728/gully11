@@ -105,6 +105,22 @@ What this shows:
 - **The simulator is overconfident.** Player ratings spread the per-match win
   chance with an sd of 0.144, while role structure alone gives 0.022. Brier
   stays above 0.25 because that spread isn't backed by enough signal.
+- **How far can match winners be called? About a coin flip.** Replaying 1,041 IPL
+  matches (2011-2026, ratings from before each match, 30 runs each): the
+  default ratings pick the winner 49.7% of the time (Brier 0.261); without
+  matchups 52.4% (0.257); with in-season form 50.1% (0.271). The standard error
+  is about 1.5 points, so all of these are close to chance. A team's previous-season
+  win rate predicts nothing either (correlation -0.01), and a team's real
+  win rate over a season (sd 0.126) is about what 14 coin flips give (0.134), so
+  IPL sides are too close for ratings to separate them. The extra spread in the
+  simulated chances (sd 0.135) is therefore not backed by data, but it is what
+  lets a stacked XI beat a weak one in the game, so it stays. The live win-chance
+  bar is unaffected: it is built from the match state (score, wickets, balls left),
+  not from player ratings.
+- **Matchups and in-season form help ball by ball, not match by match.** Both
+  sharpen the per-ball outcome model (log loss) and the team-season ordering
+  (correlation 0.23 vs 0.05), yet widen the match-level spread, which lowers the
+  Brier score slightly. Treat match-level Brier differences below about 0.01 as noise.
 - **An earlier version of this check leaked the result in reverse.** It built
   line-ups from the scorecard, so teams that chased easily had their unused
   middle order placed below the tail. That produced a −0.25 correlation with

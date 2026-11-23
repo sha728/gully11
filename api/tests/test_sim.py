@@ -254,7 +254,7 @@ def test_test_matches_follow_the_laws():
         if r.result == "win":
             assert r.winner in r.teams and r.margin.startswith("won by")
         elif r.result == "draw":
-            assert r.winner is None and r.margin == "match drawn"
+            assert r.winner is None and r.margin.startswith("match drawn: ")
         if len(r.innings) == 4 and r.winner == r.innings[3].batting:
             assert r.innings[3].runs >= r.innings[3].target
         if "innings" in r.margin:                                # beaten by an innings: 3 innings only

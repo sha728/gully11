@@ -713,8 +713,9 @@ def simulate_test(team_a: Team, team_b: Team, env: Env | str, seed: int,
     innings = [i1]
 
     def draw() -> MatchResult:
+        why = f"{lost} overs lost to rain and bad light" if lost >= 20 else "time ran out"
         return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name), innings=innings,
-                           winner=None, margin="match drawn", commentary=m.commentary,
+                           winner=None, margin=f"match drawn: {why}", commentary=m.commentary,
                            win_prob=[], result="draw")
 
     def won(team: Team, margin: str) -> MatchResult:

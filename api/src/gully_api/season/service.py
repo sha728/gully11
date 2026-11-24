@@ -213,6 +213,8 @@ def _teams(conn, room: dict, env) -> tuple[dict, dict]:
         saved = room["lineups"].get(fid)
         xi_ids, impact, picked, cap, subs = lineup_for(team, saved)
         out, when = impact_choice(saved, xi_ids, impact, picked)
+        if (saved or {}).get("choose"):
+            impact, out, when = None, None, "auto"          # chosen live, during the match
         teams[fid] = _team(fid, team, xi_ids, impact, env, cap, out, when, subs)
         used[fid] = {"xi": xi_ids, "impact": impact, "subs": subs, "picked": picked, "captain": cap}
     return teams, used
@@ -243,11 +245,12 @@ def advance(conn, room: dict, how: str, you: str | None) -> dict:
         try:
             full = run.play_next(state, teams, used, env, _captains(room, state))
         except BowlerNeeded as e:
-            # A captain's over: the season waits here until they choose (see bowl).
-            bowling = e.partial["innings"][e.innings_no - 1]["bowling"]
+            # A captain's decision: the season waits here until they make it (see bowl).
+            inn = e.partial["innings"][e.innings_no - 1]
+            side = inn["bowling"] if e.kind == "bowl" else inn["batting"]
             state["live"] = {"match": len(state["matches"]) + 1, "home": fx["home"], "away": fx["away"],
-                             "stage": fx["stage"], "key": e.key, "over": e.over + 1,
-                             "waiting": _fid_of(teams, bowling)}
+                             "stage": fx["stage"], "key": e.key, "kind": e.kind, "over": e.over + 1,
+                             "wickets": inn["wickets"], "waiting": _fid_of(teams, side)}
             break
         state.pop("live", None)
         played += 1
@@ -273,37 +276,58 @@ def live(conn, room: dict, token: str | None) -> dict:
     try:
         m = run.simulate_next(state, teams, env, _captains(room, state))
     except BowlerNeeded as e:
-        out = {**state["live"], "match_json": e.partial, "yours": you == state["live"]["waiting"]}
+        out = {**state["live"], "match_json": e.partial, "yours": you == state["live"]["waiting"],
+               "innings": e.innings_no}
         if out["yours"]:
-            out.update(options=e.options, suggested=e.suggested, innings=e.innings_no)
+            out.update(options=e.options, suggested=e.suggested, impact=e.impact)
         return out
     return {**state["live"], "match_json": m.to_dict(), "yours": False}
 
 
-def bowl(conn, room: dict, token: str | None, key: str, bowler: str) -> dict:
-    """Choose who bowls the over the season is waiting on (``auto``: the engine's
-    pick; ``rest``: the engine bowls the rest of this match for you). The host may
-    send ``rest`` for a franchise that has gone quiet. Then the season plays on to
-    the next such over, or finishes the match."""
+def bowl(conn, room: dict, token: str | None, key: str, bowler: str | None,
+         impact_in: str | None = None, impact_out: str | None = None) -> dict:
+    """Make the decision the season is waiting on.
+
+    Bowling: who bowls the over (a player, ``auto`` for the engine's pick, ``rest``
+    to let the engine bowl the rest of this match for you); with ``impact_in`` and
+    ``impact_out`` your Impact Player first comes on for that player (then, without
+    a bowler, it waits for you to choose who bowls). Batting break (start of the
+    innings or a wicket): ``impact_in``/``impact_out`` to send in your Impact
+    Player for someone yet to bat, or ``bowler`` "none" to carry on (``rest`` also
+    works). The host may send ``rest`` for a franchise that has gone quiet. Then the
+    season plays on to the next decision, or finishes the match."""
     state = room["season"]
     wait = (state or {}).get("live")
     if not wait:
         raise SeasonError("No match is waiting for a bowler.")
     you = seat_of(room, token)
     if you != wait["waiting"] and not (bowler == "rest" and is_host(room, token)):
-        raise SeasonError("It's not your over to choose.")
+        raise SeasonError("It's not your decision to make.")
     if key != wait["key"]:
-        raise SeasonError("That over has already been decided.")
-    if bowler not in ("auto", "rest"):
-        ids = {o["id"] for o in live(conn, room, token).get("options", [])}
-        if bowler not in ids:
+        raise SeasonError("That has already been decided.")
+    kind = wait.get("kind", "bowl")
+    now = live(conn, room, token) if bowler != "rest" else {}
+    if impact_in or impact_out:
+        offer = now.get("impact") or {}
+        if impact_in not in {s["id"] for s in offer.get("subs", [])} or \
+                impact_out not in {p["id"] for p in offer.get("replace", [])}:
+            raise SeasonError("That Impact Player change isn't allowed now.")
+    if bowler not in (None, "auto", "rest", "none"):
+        if kind != "bowl" or bowler not in {o["id"] for o in now.get("options", [])}:
             raise SeasonError("That player can't bowl this over.")
+    if bowler is None and not impact_in:
+        raise SeasonError("Choose a bowler, bring on your Impact Player, or carry on.")
     n = str(wait["match"])
     chosen = state.setdefault("bowling", {}).setdefault(n, {})
     if bowler == "rest":
         chosen[f"rest:{wait['waiting']}"] = "auto"
+    elif kind == "bat":
+        chosen[key] = f"{impact_in}|{impact_out}" if impact_in else "none"
     else:
-        chosen[key] = bowler
+        if impact_in:
+            chosen[f"imp:{key}"] = f"{impact_in}|{impact_out}"
+        if bowler and bowler != "none":
+            chosen[key] = bowler
     state.pop("live", None)
     return advance(conn, room, "next", you)
 

@@ -226,6 +226,21 @@ def test_season_waits_for_a_captains_bowling_change():
                 break
         wait = s["season"]["live"]
         assert wait["waiting"] == guest.id
+        # A batting break first? Bring on the Impact Player there (or carry on).
+        while wait["kind"] == "bat":
+            now = client.get(f"{A}/live", params={"token": guest.token}).json()
+            offer = now.get("impact")
+            body = {"token": guest.token, "key": wait["key"]}
+            if offer:
+                body.update(impact_in=offer["subs"][0]["id"], impact_out=offer["replace"][-1]["id"])
+            else:
+                body["bowler"] = "none"
+            s = client.post(f"{A}/live/bowl", json=body).json()
+            if offer:
+                assert s["season"].get("live") is None or s["season"]["live"]["key"] != wait["key"]
+            wait = s["season"].get("live")
+            if wait is None or wait["waiting"] != guest.id:
+                return                                   # the match finished without a bowling decision
         played = len(s["season"]["matches"])
         assert client.post(f"{A}/advance", json={"token": host, "how": "next"}).json()["season"]["live"] == wait
         # Only the guest sees who may bowl; the host can only sim it for them.

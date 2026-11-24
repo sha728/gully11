@@ -122,7 +122,7 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
         {(match.impact ?? []).filter((s) => revealed || (match.commentary[cursor - 1]?.inns ?? 0) >= s.from_innings).map((s) => (
           <p key={s.team} className="mt-1 font-mono text-xs text-muted-foreground">
             Impact Player ({who(s.team)}): <span className="text-foreground">{s.in_name}</span> in for {s.out_name},{" "}
-            {s.when === "start" ? "from the first ball" : "at the innings break"}.
+            {s.at ?? (s.when === "start" ? "from the first ball" : "at the innings break")}{s.at ? ` (innings ${s.from_innings})` : ""}.
           </p>
         ))}
         {revealed && match.result === "draw" && match.margin.includes(": ") && (
@@ -474,7 +474,7 @@ function InningsTable({ inn, n, isTest, who, note, impact }: {
           {subs.map((s) => (
             <p key={s.team} className="text-xs text-muted-foreground">
               <span className="label mr-2">Impact Player</span>{who(s.team)}: <span className="text-foreground">{s.in_name}</span> (in) for{" "}
-              {s.out_name} (out), {s.when === "start" ? "from the first ball" : "at the innings break"}
+              {s.out_name} (out), {s.at ?? (s.when === "start" ? "from the first ball" : "at the innings break")}
             </p>
           ))}
           {inn.fall_of_wickets.length > 0 && (

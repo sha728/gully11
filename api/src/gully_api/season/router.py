@@ -36,8 +36,10 @@ class Choose(BaseModel):
 
 class Bowl(BaseModel):
     token: str
-    key: str = Field(pattern=r"^[12]:\d{1,2}$")     # "<innings>:<over>"
-    bowler: str = Field(min_length=1, max_length=40)  # player id, "auto" or "rest"
+    key: str = Field(pattern=r"^(bat:)?[12]:\d{1,2}$")   # "<innings>:<over>" or "bat:<innings>:<wickets>"
+    bowler: str | None = Field(default=None, min_length=1, max_length=40)  # player id, "auto", "rest", "none"
+    impact_in: str | None = Field(default=None, max_length=40)    # your Impact Player comes on...
+    impact_out: str | None = Field(default=None, max_length=40)   # ...for this player
 
 
 def _room(conn, code: str) -> dict:
@@ -105,7 +107,7 @@ def live_bowl(code: str, req: Bowl, conn=Depends(get_conn)) -> dict[str, Any]:
     conn.execute("SELECT 1 FROM seasons WHERE code = %s FOR UPDATE", (room["code"],))   # one step at a time
     room = _room(conn, code)
     try:
-        S.bowl(conn, room, req.token, req.key, req.bowler)
+        S.bowl(conn, room, req.token, req.key, req.bowler, req.impact_in, req.impact_out)
     except S.SeasonError as e:
         raise HTTPException(409 if "already" in str(e) else 422, str(e)) from e
     conn.commit()

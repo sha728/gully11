@@ -41,15 +41,23 @@ def _coverable(quota: dict[str, int], overs: int, last: str) -> bool:
 
 
 class BowlerNeeded(Exception):
-    """Raised when the side a person captains is about to bowl an over that has no
-    choice yet (see ``simulate_match(captain=..., bowling=...)``). ``partial`` is the
-    match so far (``MatchResult.to_dict`` shape, ``result`` = "in progress");
-    ``key`` is the over to choose for ("<innings>:<over>", over 0-based)."""
+    """Raised when a side a person captains reaches a decision with no choice yet
+    (see ``simulate_match(captain=..., bowling=...)``). ``partial`` is the match so
+    far (``MatchResult.to_dict`` shape, ``result`` = "in progress").
 
-    def __init__(self, key: str, innings_no: int, over: int, options: list[dict], suggested: str):
-        super().__init__(f"bowler needed for {key}")
+    ``kind`` "bowl": about to bowl an over; ``key`` = "<innings>:<over>" (0-based),
+    ``options`` who may bowl it, ``suggested`` the engine's pick. ``kind`` "bat": a
+    natural break while batting (the start of the innings, or a wicket has just
+    fallen); ``key`` = "bat:<innings>:<wickets>". ``impact``: the Impact Player
+    offer when the side still has one to use ({"subs": [...], "replace": [...]}),
+    else None."""
+
+    def __init__(self, key: str, innings_no: int, over: int, options: list[dict], suggested: str,
+                 kind: str = "bowl", impact: dict | None = None):
+        super().__init__(f"decision needed for {key}")
         self.key, self.innings_no, self.over = key, innings_no, over
         self.options, self.suggested = options, suggested
+        self.kind, self.impact = kind, impact
         self.partial: dict | None = None
 
 
@@ -344,6 +352,10 @@ class _Match:
         self.fill_auto: set[str] = set()    # captained teams whose unchosen overs go to the engine
         self.played: list[Innings] = []     # innings in the order started (for a pause)
         self.impact: list[dict] = []        # Impact Players used (see MatchResult.impact)
+        # Captained sides bring on their Impact Player themselves: the subs they may
+        # still use, and (once used) who came on for whom from which innings.
+        self.subs: dict[str, list[Profile]] = {}
+        self.subbed: dict[str, dict] = {}
         self.toss: dict | None = None
         self.with_commentary = commentary
         self.commentary: list[dict] = []
@@ -464,6 +476,39 @@ class _Match:
         total = sum(weights)
         return eligible[_pick(self.rng, [w / total for w in weights])]
 
+    def _impact_offer(self, team: Team, replaceable: list[Profile]) -> dict | None:
+        """What a captained side may do with its Impact Player now, or None."""
+        subs = self.subs.get(team.name) or []
+        if not subs or team.name in self.subbed or not replaceable:
+            return None
+        return {"subs": [{"id": p.id, "name": p.name, "role": p.role, "kind": p.kind} for p in subs],
+                "replace": [{"id": p.id, "name": p.name, "role": p.role} for p in replaceable]}
+
+    def _impact_decision(self, team: Team, key: str, replaceable: list[Profile]) -> tuple[Profile, str] | None:
+        """The (sub, replaced player id) chosen at this break, if any and still allowed."""
+        choice = self.bowling.get(key)
+        if not choice or choice == "none" or "|" not in choice:
+            return None
+        sub_id, out = choice.split("|", 1)
+        sub = next((p for p in self.subs.get(team.name) or [] if p.id == sub_id), None)
+        if sub is None or team.name in self.subbed or out not in {p.id for p in replaceable}:
+            return None
+        return sub, out
+
+    def _record_sub(self, team: Team, sub: Profile, out: Profile, innings_no: int, at: str) -> None:
+        self.subbed[team.name] = {"in": sub, "out": out.id, "innings": innings_no}
+        self.impact.append({"team": team.name, "in": sub.id, "in_name": sub.name, "out": out.id,
+                            "out_name": out.name, "when": "live", "at": at, "from_innings": innings_no})
+
+    def side(self, team: Team, plan: dict | None, innings_no: int) -> Team:
+        """The XI a team fields in this innings: its plan (see impact_plan), or for a
+        captained side, the XI with any Impact Player brought on earlier in the match."""
+        base = _side(team, plan, innings_no)
+        done = self.subbed.get(team.name)
+        if done and done["innings"] < innings_no and done["out"] in {p.id for p in base.players}:
+            return _swap(base, done["out"], done["in"])
+        return base
+
     def _captains_choice(self, team: Team, by_id: dict[str, Profile], inn: Innings, innings_no: int,
                          over: int, last: str | None, left: dict[str, int], max_overs: int,
                          spell: dict[str, int], keeper: str) -> str:
@@ -488,7 +533,8 @@ class _Match:
                             "regular": pid in regular, "overs": bl.overs, "runs": bl.runs,
                             "wickets": bl.wickets, "overs_left": left[pid]})
         options.sort(key=lambda o: (not o["regular"], o["name"]))
-        raise BowlerNeeded(key, innings_no, over, options, suggested)
+        offer = self._impact_offer(team, [p for p in team.players if p.id != keeper])
+        raise BowlerNeeded(key, innings_no, over, options, suggested, impact=offer)
 
     # -- one innings -----------------------------------------------------
     def innings(self, bat_team: Team, bowl_team: Team, innings_no: int,
@@ -505,8 +551,38 @@ class _Match:
         if not super_over:
             self.played.append(inn)
         controlled = bowl_team.name in self.control and not super_over and not env.is_test
+        bat_controlled = bat_team.name in self.control and not super_over and not env.is_test
         batters = super_over[0] if super_over else bat_team.players
         max_wickets = len(batters) - 1
+
+        def batting_break(batters: list[Profile], next_in: int, at_start: bool) -> list[Profile]:
+            """A captained batting side at a natural break (start of the innings, or a
+            wicket just fell): bring on the Impact Player for someone yet to bat, or
+            not. Returns the batting order from here."""
+            if not bat_controlled or bat_team.name in self.subbed or not self.subs.get(bat_team.name):
+                return batters
+            if bat_team.name in self.fill_auto:
+                return batters                               # "sim the rest": no change
+            yet = batters[next_in:]
+            key = f"bat:{innings_no}:{inn.wickets}"
+            picked = self._impact_decision(bat_team, key, yet)
+            if picked is None:
+                if self.bowling.get(key):
+                    return batters                           # "not now" (or no longer allowed)
+                raise BowlerNeeded(key, innings_no, inn.legal_balls // 6, [], "", kind="bat",
+                                   impact=self._impact_offer(bat_team, yet))
+            sub, out = picked
+            out_p = next(p for p in batters if p.id == out)
+            if at_start:
+                order = [sub if p.id == out else p for p in batters]
+            else:
+                order = batters[:next_in] + [sub] + [p for p in yet if p.id != out]
+            inn.bat.pop(out, None)
+            inn.bat[sub.id] = BatLine(sub.name)
+            at = "at the start of the innings" if at_start else f"after the fall of wicket {inn.wickets}"
+            self._record_sub(bat_team, sub, out_p, innings_no, at)
+            return order
+
         for p in batters:
             inn.bat[p.id] = BatLine(p.name)
         squad = bowl_team.players + bowl_team.impact
@@ -514,6 +590,7 @@ class _Match:
             inn.bowl[p.id] = BowlLine(p.name)
         by_id = {p.id: p for p in squad}
         striker, non_striker, next_in = 0, 1, 2
+        batters = batting_break(batters, 0, at_start=True)
         inn.bat[batters[0].id].how_out = "not out"
         inn.bat[batters[1].id].how_out = "not out"
         quota = env.max_overs_per_bowler if not env.is_test else 10_000
@@ -547,6 +624,20 @@ class _Match:
             elif over == hunch_over and hunch != last_bowler and left[hunch] > 0:
                 bid = hunch
             elif controlled:
+                picked = self._impact_decision(bowl_team, f"imp:{innings_no}:{over}",
+                                               [p for p in bowl_team.players if p.id != keeper])
+                if picked:
+                    # The Impact Player comes on at the end of the over just gone.
+                    sub, out = picked
+                    out_p = next(p for p in bowl_team.players if p.id == out)
+                    bowl_team = _swap(bowl_team, out, sub)
+                    by_id[sub.id] = sub
+                    inn.bowl[sub.id] = BowlLine(sub.name)
+                    left[sub.id], spell[sub.id], rested[sub.id] = quota, 0, 99
+                    keeper = bowl_team.keeper_id()
+                    fielders = list(bowl_team.players)
+                    at = "before the first ball of the innings" if over == 0 else f"after over {over}"
+                    self._record_sub(bowl_team, sub, out_p, innings_no, at)
                 bid = self._captains_choice(bowl_team, by_id, inn, innings_no, over, last_bowler, left,
                                             max_overs, spell, keeper)
             else:
@@ -619,6 +710,7 @@ class _Match:
                             event.update(kind="wicket", runs=0, out=out.name, how=how,
                                          wicket_kind=kind, fielder=fielder)
                             if inn.wickets < max_wickets and next_in < len(batters):
+                                batters = batting_break(batters, next_in, at_start=False)
                                 inn.bat[batters[next_in].id].how_out = "not out"
                                 if out_idx == striker:
                                     striker = next_in
@@ -852,10 +944,13 @@ def _limited_overs(m: "_Match", team_a: Team, team_b: Team, env: Env, seed: int,
     if bat_first is None:
         bat_first, m.toss = _toss(m.rng, team_a, team_b, env)
     first, second = (team_a, team_b) if bat_first == 0 else (team_b, team_a)
-    plans = {first.name: impact_plan(first, True), second.name: impact_plan(second, False)}
+    # A side a person captains brings on its Impact Player itself, during the match;
+    # the engine plans everyone else's.
+    plans = {t.name: (None if t.name in m.control else impact_plan(t, t is first)) for t in (first, second)}
+    m.subs = {t.name: list(t.impact) for t in (first, second) if t.name in m.control and t.impact}
     m.impact = [pl["record"] for pl in plans.values() if pl]
-    i1 = m.innings(_side(first, plans[first.name], 1), _side(second, plans[second.name], 1), 1, None)
-    first, second = _side(first, plans[first.name], 2), _side(second, plans[second.name], 2)
+    i1 = m.innings(m.side(first, plans[first.name], 1), m.side(second, plans[second.name], 1), 1, None)
+    first, second = m.side(first, plans[first.name], 2), m.side(second, plans[second.name], 2)
     i2 = m.innings(second, first, 2, i1.runs + 1)
 
     if i2.runs > i1.runs:

@@ -97,3 +97,56 @@ def test_lineup_names_up_to_five_subs_from_the_bench():
         lineup.check(players, xi, "P16", subs=["P11"])            # the Impact Player must be a named sub
     with pytest.raises(lineup.LineupError):
         lineup.check(players, xi, None, subs=["P3"])              # subs come from the bench
+
+
+def play_captained(team, other, seed, decide):
+    """Play a match captaining ``team``: ``decide(exc)`` returns the choices to add."""
+    from gully_api.sim import BowlerNeeded
+    choices = {}
+    for _ in range(200):
+        try:
+            return simulate_match(team, other, ENV, seed, captain=team.name, bowling=choices, commentary=False), choices
+        except BowlerNeeded as e:
+            choices.update(decide(e))
+    raise AssertionError("never finished")
+
+
+def test_you_bring_on_your_impact_player_yourself():
+    subs = [from_phase_rows({"id": f"AS{i}", "name": f"A Sub {i}", "role": r}, [], ENV) for i, r in enumerate(["BAT", "BOWL"])]
+    a = Team("A", side("A").players, impact=subs)
+    seen = []
+
+    def decide(e):
+        seen.append(e.kind)
+        if e.kind == "bat":
+            assert e.impact and {s["id"] for s in e.impact["subs"]} == {"AS0", "AS1"}
+            # Bring the batter on for the last man yet to bat.
+            return {e.key: f"AS0|{e.impact['replace'][-1]['id']}"}
+        return {e.key: "auto"}
+
+    r, choices = play_captained(a, side("B"), 5, decide)
+    d = r.to_dict()
+    rec = [x for x in d["impact"] if x["team"] == "A"]
+    assert len(rec) == 1 and rec[0]["in"] == "AS0" and rec[0]["when"] == "live" and rec[0]["out"] == "A10"
+    assert "bat" in seen
+    bat = next(i for i in d["innings"] if i["batting"] == "A")["batting_card"]
+    assert "AS0" in {b["id"] for b in bat} and "A10" not in {b["id"] for b in bat}
+
+
+def test_bowling_side_brings_its_impact_player_on_at_the_end_of_an_over():
+    subs = [from_phase_rows({"id": "AS1", "name": "A Sub", "role": "BOWL"}, [], ENV)]
+    a = Team("A", side("A").players, impact=subs)
+
+    def decide(e):
+        if e.kind == "bat":
+            return {e.key: "none"}
+        if e.impact and e.over >= 3:
+            return {f"imp:{e.key}": f"AS1|{e.impact['replace'][0]['id']}", e.key: "AS1"}
+        return {e.key: "auto"}
+
+    r, _ = play_captained(a, side("B"), 2, decide)
+    d = r.to_dict()
+    rec = next(x for x in d["impact"] if x["team"] == "A")
+    assert rec["in"] == "AS1" and rec["at"].startswith("after over")
+    bowled = next(i for i in d["innings"] if i["bowling"] == "A")["bowling_card"]
+    assert "AS1" in {b["id"] for b in bowled}

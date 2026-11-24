@@ -197,7 +197,8 @@ export interface ImpactSub {
   in_name: string;
   out: string;
   out_name: string;
-  when: "start" | "break";
+  when: "start" | "break" | "live";   // live: brought on by the captain during the match (see ``at``)
+  at?: string;                        // "after over 12", "after the fall of wicket 3", ...
   from_innings: number;
 }
 

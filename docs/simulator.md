@@ -324,3 +324,20 @@ Earlier the sub bowled from the first ball without anyone leaving (a 12th man).
 With this rule the IPL 2024–26 replay still lands on real figures: first-innings
 mean 190.0 v 191.9, chasing side wins 54.2% v 54.9%. Every match lists the changes
 in `impact` (who came in, who went out, when), shown on the scorecard.
+
+### Bringing on the Impact Player yourself
+
+A side captained live (the season's "Captain my matches live") never has its
+Impact Player picked by the engine. Its named subs stay on the bench until the
+captain brings one on, at the rule's natural breaks:
+
+- **Bowling:** before any over the side bowls (the end of the over just gone, or
+  the start of the innings): the sub replaces any player but the keeper and can
+  bowl a full four overs at once (choice key `imp:<innings>:<over>`).
+- **Batting:** at the start of the innings and each time a wicket falls (the pause
+  `kind` is "bat", key `bat:<innings>:<wickets>`): the sub replaces someone yet to
+  bat and goes in next, so only eleven ever bat. "Not now" carries on.
+
+One change a match. The replaced player takes no further part, in this innings
+or the next. The scorecard records when ("after over 12", "after the fall of
+wicket 3").

@@ -78,9 +78,17 @@ export interface SeasonWait {
   home: string;
   away: string;
   stage: MatchSummary["stage"];
-  key: string;            // "<innings>:<over>"
+  key: string;            // "<innings>:<over>" (bowling) or "bat:<innings>:<wickets>"
+  kind: "bowl" | "bat";   // choosing a bowler, or a batting break (start of innings / a wicket)
   over: number;           // 1-based
-  waiting: string;        // franchise id whose over it is
+  wickets: number;
+  waiting: string;        // franchise id whose decision it is
+}
+
+/** What a captained side may do with its Impact Player right now. */
+export interface ImpactOffer {
+  subs: { id: string; name: string; role: Role; kind: "pace" | "spin" | null }[];
+  replace: { id: string; name: string; role: Role }[];
 }
 
 /** The waiting match so far; ``options`` only for the franchise whose over it is. */
@@ -90,6 +98,7 @@ export interface SeasonLive extends SeasonWait {
   options?: BowlOption[];
   suggested?: string;
   innings?: number;
+  impact?: ImpactOffer | null;
 }
 
 export interface Fixture { stage: MatchSummary["stage"]; home: string; away: string; match: number }
@@ -138,8 +147,11 @@ export const seasonApi = {
     call<SeasonView>(`${base(code)}/choose`, { method: "PUT", body: JSON.stringify({ token, on }) }),
   live: (code: string, token: string | null) =>
     call<SeasonLive>(`${base(code)}/live${token ? `?token=${encodeURIComponent(token)}` : ""}`),
-  bowl: (code: string, token: string, key: string, bowler: string) =>
-    call<SeasonView>(`${base(code)}/live/bowl`, { method: "POST", body: JSON.stringify({ token, key, bowler }) }),
+  bowl: (code: string, token: string, key: string, bowler: string | null, impactIn?: string, impactOut?: string) =>
+    call<SeasonView>(`${base(code)}/live/bowl`, {
+      method: "POST",
+      body: JSON.stringify({ token, key, bowler, impact_in: impactIn ?? null, impact_out: impactOut ?? null }),
+    }),
 };
 
 // Matches of yours this browser has watched, so a fresh result of yours offers

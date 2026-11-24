@@ -268,7 +268,13 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
             );
           })}
         </ul>
-        {subs.length > 0 && (
+        {subs.length > 0 && choose && (
+          <p className="border border-signal/40 bg-signal/5 p-3 text-sm">
+            You&apos;re captaining live: at the start of each innings, after each wicket while you bat and before each over you bowl,
+            you can bring on one of these subs as your Impact Player. He replaces a player of your choice, who takes no further part.
+          </p>
+        )}
+        {subs.length > 0 && !choose && (
           <div className="space-y-3 border border-signal/40 bg-signal/5 p-3 text-sm">
             <label className="block space-y-1">
               <span className="label block">Impact Player</span>
@@ -324,7 +330,7 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
               }
               finally { setChooseBusy(false); }
             }} />
-          Choose my bowler every over
+          Captain my matches live: choose my bowler every over and when my Impact Player comes on
         </label>
         {state.kind === "saved" && <span className="text-sm text-signal">Saved: used from your next match.</span>}
         {state.kind === "error" && <span className="text-sm text-destructive">{state.msg}</span>}
@@ -446,10 +452,11 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
         <div className="flex flex-wrap items-center gap-3 border border-signal/50 bg-signal/5 px-4 py-3">
           <span className="flex-1 text-sm">
             Match {season.live.match}: {season.live.waiting === you ? <b>your</b> : <b>{idOf[season.live.waiting] ?? "a"}</b>}{" "}
-            captain to choose who bowls over {season.live.over}. The season waits until they do.
+            captain {season.live.kind === "bat" ? "to decide on the Impact Player" : `to choose who bowls over ${season.live.over}`}.
+            The season waits until they do.
           </span>
           <Button asChild className="font-mono uppercase">
-            <Link href={`/auction/${code}/season/live`}>{season.live.waiting === you ? "Choose your bowler" : "Watch"}</Link>
+            <Link href={`/auction/${code}/season/live`}>{season.live.waiting === you ? (season.live.kind === "bat" ? "Decide" : "Choose your bowler") : "Watch"}</Link>
           </Button>
           {view.host && season.live.waiting !== you && (
             <Button variant="ghost" disabled={busy} className="font-mono uppercase" onClick={async () => {

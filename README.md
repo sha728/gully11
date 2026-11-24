@@ -37,9 +37,9 @@ uv run gully-pipeline auction2026                 # IPL 2026 auction + retention
 uv run pytest
 
 # Weekly refresh (from the repo root): download -> parse -> names -> build -> styles -> build -> load
-.\scriptsefresh-data.ps1             # run now; log in pipeline/data/refresh-logs/
-.\scriptsefresh-data.ps1 -Register   # every Monday 06:00 via Windows Task Scheduler (-Unregister to stop)
-# It only updates the local database; push to the live site with .pi\scripts\copy_db.ps1
+.\scripts\refresh-data.ps1             # run now; log in pipeline/data/refresh-logs/
+.\scripts\refresh-data.ps1 -Register   # every Monday 06:00 via Windows Task Scheduler (-Unregister to stop)
+# It only updates the local database; push to the live site with .\api\scripts\copy_db.ps1
 
 # API
 cd ../api

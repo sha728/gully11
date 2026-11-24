@@ -63,6 +63,11 @@ class Captain(BaseModel):
     player: str | None = None        # one of your picks; None = let the engine choose
 
 
+class BowlChoice(BaseModel):
+    key: str = Field(pattern=r"^[12]:\d{1,2}$")     # "<innings>:<over>", the over being chosen for
+    bowler: str = Field(min_length=1, max_length=40)  # a player id, "auto" (engine's pick) or "rest" (sim the rest)
+
+
 class EntryName(BaseModel):
     name: str = Field(min_length=2, max_length=20, pattern=r"^[A-Za-z0-9 _.\-]+$")
 
@@ -100,7 +105,7 @@ def _view(conn, row: dict) -> dict[str, Any]:
 # right after creating a draft, the series page right after Play) could miss it.
 def _save(conn, row: dict, **changes) -> dict:
     sets = ", ".join(f"{k} = %s" for k in changes)
-    vals = [Jsonb(v) if k == "picks" else v for k, v in changes.items()]
+    vals = [Jsonb(v) if k in ("picks", "bowling") else v for k, v in changes.items()]
     conn.execute(f"UPDATE xi_drafts SET {sets}, updated_at = now() WHERE id = %s", (*vals, row["id"]))
     return {**row, **changes}
 
@@ -195,6 +200,52 @@ def set_captain(draft_id: str, req: Captain, conn=Depends(get_conn)) -> dict[str
     return _view(conn, row)
 
 
+def _live(conn, row: dict, n: int) -> dict[str, Any]:
+    d = _draft(conn, row)
+    if not d.status()["ready"]:
+        raise HTTPException(422, "Your XI isn't complete yet.")
+    picks = [p["id"] for p in row["picks"]]
+    slots = [p["slot"] for p in row["picks"]]
+    try:
+        return service.live_match(conn, row["format"], row["seed"], picks, slots,
+                                  row.get("captain") if row.get("captain") in picks else None,
+                                  row.get("bowling"), n)
+    except (service.LiveError, DraftError) as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.get("/drafts/{draft_id}/live/{n}")
+def live_match(draft_id: str, n: int, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Match ``n`` of the series you're captaining, as far as your bowling choices
+    go: the match so far and who may bowl the next over, or the finished match."""
+    row = _load(conn, draft_id)
+    _editable(row)
+    return _live(conn, row, n)
+
+
+@router.post("/drafts/{draft_id}/live/{n}/bowl")
+def live_bowl(draft_id: str, n: int, req: BowlChoice, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Choose who bowls the over the match is waiting on ("auto": let the engine
+    choose this one; "rest": the engine picks for the rest of this match)."""
+    row = _load(conn, draft_id, lock=True)
+    _editable(row)
+    state = _live(conn, row, n)
+    if state["status"] != "bowl" or state["key"] != req.key:
+        raise HTTPException(409, "That over has already been decided.")
+    if req.bowler not in ("auto", "rest") and req.bowler not in {o["id"] for o in state["options"]}:
+        raise HTTPException(422, "That player can't bowl this over.")
+    bowling = dict(row.get("bowling") or {})
+    match = dict(bowling.get(str(n)) or {})
+    if req.bowler == "rest":
+        match["rest"] = "auto"
+    else:
+        match[req.key] = req.bowler
+    bowling[str(n)] = match
+    row = _save(conn, row, bowling=bowling)
+    conn.commit()
+    return _live(conn, row, n)
+
+
 @router.post("/drafts/{draft_id}/play")
 def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
     """Play the drafted XI: five seeded matches against the Greats, saved under a
@@ -209,7 +260,8 @@ def play(draft_id: str, conn=Depends(get_conn)) -> dict[str, Any]:
     slots = [p["slot"] for p in row["picks"]]
     try:
         out = service.play_series(conn, row["format"], row["seed"], picks, slots,
-                                  captain=row.get("captain") if row.get("captain") in picks else None)
+                                  captain=row.get("captain") if row.get("captain") in picks else None,
+                                  bowling=row.get("bowling") or None)
     except DraftError as e:
         raise HTTPException(422, str(e)) from e
     full = out.pop("_full")

@@ -273,3 +273,54 @@ factor, the calibration step, and keeping death bowlers' last overs.
 ## Captaincy
 
 `gully-pipeline captains` reads Wikipedia captain lists (IPL + each Test nation, CC BY-SA) into `api/src/gully_api/sim/data/captains.csv`. A captain's rating (0..1) = experience x shrunk win rate (`sim/captaincy.py`); it drives the toss call and bowling changes only, never batting or bowling skill. Measured edge of a 0.9 captain over none: T20 +1.5 pts, ODI +4.4, Test ~+2.
+
+## Choosing your bowlers (T20s)
+
+In the XI Builder's IPL and T20I series, and in your own matches in an IPL season
+(turn on "Choose my bowler every over" under your XI), you can pick who bowls every
+over your side bowls.
+
+- `simulate_match(..., captain=..., bowling=...)` takes the captained team name(s)
+  and the choices so far (`"<innings>:<over>"` → player id or `"auto"`). At the first
+  over without a choice it raises `BowlerNeeded` with the match so far, who may bowl
+  (anyone but the keeper, with overs left, not the previous over's bowler) and the
+  engine's own suggestion. `fill_auto` lets the engine pick the overs still open
+  ("Sim the rest of this match").
+- The match is deterministic in (seed, choices), so the server keeps only the
+  choices and replays the match to the next pause each time; nothing is held in
+  memory between requests. A captained side gets no "captain's hunch" part-timer
+  over: you decide.
+- XI series: choices live on the draft (`xi_drafts.bowling`); matches are played in
+  order and the series is saved, with your choices, when you ask for the verdict.
+  Its share link is your own (the slug includes the choices).
+- Seasons: when a captained franchise has to bowl, the season stops at that over
+  (`state.live`) until that franchise chooses; the host can "Sim it for them".
+  Both sides of a match can be captained.
+- Tests and super overs stay with the engine.
+
+## Impact Player (IPL)
+
+The IPL rule: a side names substitutes, and one of them, the Impact Player, may
+replace one of the XI at a natural break (start of an innings, end of an over, fall
+of a wicket). The replaced player takes no further part; the Impact Player can bat
+and bowl a full four overs. With four overseas players in the XI he must be Indian.
+
+`Team.impact` is the named substitutes (up to five), `impact_pick` the one to use
+(None: after the toss the engine takes the best bowling sub when batting first, the
+best batting sub when chasing), `impact_out` who he replaces and `impact_when` when
+(`impact_plan`). Changes happen at the start of the match or the innings break:
+
+- **start / break**: done as chosen. With no `impact_out`, he replaces the XI's
+  weakest player at his skill (a bowler sub: who bowls least; a batter: who bats
+  least). A batter takes the replaced player's place in the order; a bowler bats
+  last and joins the side's six bowlers.
+- **auto** (bots, and "when he's needed"): IPL sides name the XI after the toss, so
+  they field their sub's skill in the innings that needs it and the full XI in the
+  other. A bowling sub on a side batting first comes on at the break; on a side
+  bowling first he's named in the XI instead of the weakest batter, who then comes
+  on at the break as the Impact Player for him (and the mirror for a batting sub).
+
+Earlier the sub bowled from the first ball without anyone leaving (a 12th man).
+With this rule the IPL 2024–26 replay still lands on real figures: first-innings
+mean 190.0 v 191.9, chasing side wins 54.2% v 54.9%. Every match lists the changes
+in `impact` (who came in, who went out, when), shown on the scorecard.

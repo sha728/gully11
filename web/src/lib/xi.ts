@@ -101,6 +101,28 @@ export interface Award {
   matches?: number;
 }
 
+/** Formats where you can captain the series, choosing the bowler for every over. */
+export const CAPTAIN_FORMATS: XIFormat[] = ["T20I", "IPL"];
+
+/** Someone who may bowl the over a captained match is waiting on, with their figures so far. */
+export interface BowlOption {
+  id: string;
+  name: string;
+  role: Role;
+  kind: "pace" | "spin" | null;
+  regular: boolean;          // one of the side's usual bowlers (else a part-timer)
+  overs: string;
+  runs: number;
+  wickets: number;
+  overs_left: number;
+}
+
+/** A match you captain: so far, waiting for your next bowler, or finished. */
+export type LiveMatch =
+  | { n: number; status: "bowl"; match: FullMatch; key: string; over: number; innings: number;
+      options: BowlOption[]; suggested: string; series: MatchSummary[] }
+  | { n: number; status: "done"; match: FullMatch; series: MatchSummary[] };
+
 export interface MatchSummary {
   match: number;
   winner: string | null;
@@ -168,6 +190,17 @@ export interface InningsCard {
   fall_of_wickets: string[];
 }
 
+/** An IPL Impact Player change: ``in`` came on for ``out`` (who took no further part). */
+export interface ImpactSub {
+  team: string;
+  in: string;
+  in_name: string;
+  out: string;
+  out_name: string;
+  when: "start" | "break";
+  from_innings: number;
+}
+
 export interface FullMatch {
   seed: number;
   env: string;
@@ -175,12 +208,13 @@ export interface FullMatch {
   innings: InningsCard[];
   winner: string | null;
   margin: string;
-  result: "win" | "draw" | "tie" | "super over";
+  result: "win" | "draw" | "tie" | "super over" | "in progress";
   commentary: BallEvent[];
   win_prob: [string, number][];
   /** A tie settled by super overs: their innings, in order (one over each). */
   super_overs?: InningsCard[];
   player_of_match?: Award | null;
+  impact?: ImpactSub[];
   toss?: { winner: string; decision: "bat" | "bowl"; captain: string | null; called_right: boolean } | null;
 }
 
@@ -222,6 +256,9 @@ export const xiApi = {
   move: (id: string, from: number, to: number) => call<DraftView>(`${draftPath(id)}/move`, post({ from, to })),
   captain: (id: string, player: string | null) => call<DraftView>(`${draftPath(id)}/captain`, post({ player })),
   play: (id: string) => call<{ slug: string; rival: string | null }>(`${draftPath(id)}/play`, post()),
+  live: (id: string, n: number) => call<LiveMatch>(`${draftPath(id)}/live/${n}`),
+  bowl: (id: string, n: number, key: string, bowler: string) =>
+    call<LiveMatch>(`${draftPath(id)}/live/${n}/bowl`, post({ key, bowler })),
   challenge: (slug: string) => call<Challenge>(`/xi/challenge/${encodeURIComponent(slug)}`),
   match: (slug: string, n: number) => call<FullMatch>(`/xi/challenge/${encodeURIComponent(slug)}/match/${n}`),
   leaderboard: (format: XIFormat, opts: { day?: string; draft?: string | null } = {}) => {

@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { glyph, keyMoments, liveState, overEnds, type LiveState, type Moment } from "@/lib/replay";
 import { cn } from "@/lib/utils";
-import { superOverNo, type BallEvent, type Challenge, type FullMatch, type InningsCard } from "@/lib/xi";
+import { superOverNo, type BallEvent, type Challenge, type FullMatch, type ImpactSub, type InningsCard } from "@/lib/xi";
 
 const YOU = "Your XI";
 const BALLS: Record<string, number | null> = { Test: null, ODI: 300, T20I: 120, IPL: 120 };
@@ -64,17 +64,28 @@ export function MatchDay({ challenge, match, n, live, vs, summary }: {
 /** One match: heading, live replay, scorecard and worm. ``who`` turns a team name
  * into its label ("You", "Greats", "RCB"); ``you`` is the viewer's team, if any.
  * ``live`` hides the result (heading, cards, ``summary``) until the last ball;
- * ``after`` shows once it's revealed in a live match (what comes next). */
-export function MatchStage({ match, format, live, who, you, kicker, summary, after }: {
+ * ``after`` shows once it's revealed in a live match (what comes next).
+ * A match "in progress" (one you captain) plays to its last ball and shows
+ * ``pause`` there (the bowler choice); when it grows, replay carries on from there. */
+export function MatchStage({ match, format, live, who, you, kicker, summary, after, pause }: {
   match: FullMatch; format: string; live: boolean; who: (team: string) => string; you: string | null;
-  kicker: React.ReactNode; summary?: React.ReactNode; after?: React.ReactNode;
+  kicker: React.ReactNode; summary?: React.ReactNode; after?: React.ReactNode; pause?: React.ReactNode;
 }) {
   const isTest = format === "Test";
   const balls = match.commentary;
   const [cursor, setCursor] = useState(live ? 0 : balls.length);
   const [playing, setPlaying] = useState(live);
   const [speed, setSpeed] = useState(isTest ? 3 : 1);
-  const revealed = !live || cursor >= balls.length;
+  const inProgress = match.result === "in progress";
+  const revealed = (!live || cursor >= balls.length) && !inProgress;
+  const waiting = inProgress && cursor >= balls.length;
+
+  // New balls arrived (a captained match moved on): keep playing from where we are.
+  const seen = useRef(balls.length);
+  useEffect(() => {
+    if (balls.length > seen.current) setPlaying(true);
+    seen.current = balls.length;
+  }, [balls.length]);
 
   useEffect(() => {
     if (!playing) return;
@@ -108,6 +119,12 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
             Toss: {who(match.toss.winner)} won it{match.toss.captain ? ` (captain ${match.toss.captain})` : ""} and chose to {match.toss.decision} first.
           </p>
         )}
+        {(match.impact ?? []).filter((s) => revealed || (match.commentary[cursor - 1]?.inns ?? 0) >= s.from_innings).map((s) => (
+          <p key={s.team} className="mt-1 font-mono text-xs text-muted-foreground">
+            Impact Player ({who(s.team)}): <span className="text-foreground">{s.in_name}</span> in for {s.out_name},{" "}
+            {s.when === "start" ? "from the first ball" : "at the innings break"}.
+          </p>
+        ))}
         {revealed && match.result === "draw" && match.margin.includes(": ") && (
           <p className="mt-1 font-mono text-xs text-muted-foreground">Drawn: {match.margin.split(": ")[1]}.</p>
         )}
@@ -126,6 +143,8 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
 
       {revealed && summary}
 
+      {waiting && pause}
+
       <Tabs defaultValue="replay" className="gap-6">
         <TabsList variant="line" className="w-full justify-start border-b">
           <TabsTrigger value="replay" className="font-mono text-xs uppercase">Ball by ball</TabsTrigger>
@@ -138,9 +157,9 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
         </TabsContent>
         {revealed && (
           <TabsContent value="card" className="space-y-12">
-            {match.innings.map((inn, i) => <InningsTable key={i} inn={inn} n={i + 1} isTest={isTest} who={who} />)}
+            {match.innings.map((inn, i) => <InningsTable key={i} inn={inn} n={i + 1} isTest={isTest} who={who} impact={match.impact} />)}
             {match.super_overs?.map((inn, i) => (
-              <InningsTable key={`so${i}`} inn={inn} n={match.innings.length + i + 1} isTest={false} who={who}
+              <InningsTable key={`so${i}`} inn={inn} n={match.innings.length + i + 1} isTest={false} who={who} impact={match.impact}
                 note={match.super_overs!.length > 2 ? `super over ${Math.floor(i / 2) + 1}` : "super over"} />
             ))}
           </TabsContent>
@@ -358,10 +377,25 @@ function Moments({ moments, cursor, onJump, isTest, live }: {
 
 // ---------------------------------------------------------------- scorecard
 
-function InningsTable({ inn, n, isTest, who, note }: {
-  inn: InningsCard; n: number; isTest: boolean; who: (t: string) => string; note?: string;
+/** "in" / "out" next to an Impact Player change in a scorecard. */
+function SubTag({ id, team, impact }: { id: string; team: string; impact?: ImpactSub[] }) {
+  const s = impact?.find((x) => x.team === team && (x.in === id || x.out === id));
+  if (!s) return null;
+  const isIn = s.in === id;
+  return (
+    <span title={isIn ? `Impact Player: came on for ${s.out_name}` : `Replaced by Impact Player ${s.in_name}`}
+      className={cn("ml-2 px-1 py-0.5 align-middle font-mono text-[9px] tracking-wide uppercase",
+        isIn ? "bg-signal text-signal-foreground" : "border text-muted-foreground")}>
+      {isIn ? "impact · in" : "out"}
+    </span>
+  );
+}
+
+function InningsTable({ inn, n, isTest, who, note, impact }: {
+  inn: InningsCard; n: number; isTest: boolean; who: (t: string) => string; note?: string; impact?: ImpactSub[];
 }) {
   const batted = inn.batting_card.filter((b) => b.how_out);
+  const subs = (impact ?? []).filter((s) => s.team === inn.batting || s.team === inn.bowling);
   const dnb = inn.batting_card.filter((b) => !b.how_out);
   const extras = inn.extras.wides + inn.extras.noballs + inn.extras.byes;
   return (
@@ -387,7 +421,7 @@ function InningsTable({ inn, n, isTest, who, note }: {
             <TableBody className="font-mono tnum">
               {batted.map((b) => (
                 <TableRow key={b.id}>
-                  <TableCell className="font-sans font-medium">{b.name}</TableCell>
+                  <TableCell className="font-sans font-medium">{b.name}<SubTag id={b.id} team={inn.batting} impact={impact} /></TableCell>
                   <TableCell className="max-w-48 truncate font-sans text-xs text-muted-foreground">{b.how_out}</TableCell>
                   <TableCell className="text-right font-semibold">{b.runs}</TableCell>
                   <TableCell className="text-right">{b.balls}</TableCell>
@@ -422,7 +456,7 @@ function InningsTable({ inn, n, isTest, who, note }: {
                   const balls = Math.floor(Number(b.overs)) * 6 + Math.round((Number(b.overs) % 1) * 10);
                   return (
                     <TableRow key={b.id}>
-                      <TableCell className="font-sans font-medium">{b.name}</TableCell>
+                      <TableCell className="font-sans font-medium">{b.name}<SubTag id={b.id} team={inn.bowling} impact={impact} /></TableCell>
                       <TableCell className="text-right">{b.overs}</TableCell>
                       <TableCell className="text-right">{b.maidens}</TableCell>
                       <TableCell className="text-right">{b.runs}</TableCell>
@@ -437,6 +471,12 @@ function InningsTable({ inn, n, isTest, who, note }: {
           {dnb.length > 0 && (
             <p className="text-xs text-muted-foreground"><span className="label mr-2">Did not bat</span>{dnb.map((b) => b.name).join(", ")}</p>
           )}
+          {subs.map((s) => (
+            <p key={s.team} className="text-xs text-muted-foreground">
+              <span className="label mr-2">Impact Player</span>{who(s.team)}: <span className="text-foreground">{s.in_name}</span> (in) for{" "}
+              {s.out_name} (out), {s.when === "start" ? "from the first ball" : "at the innings break"}
+            </p>
+          ))}
           {inn.fall_of_wickets.length > 0 && (
             <p className="text-xs leading-relaxed text-muted-foreground">
               <span className="label mr-2">Fall of wickets</span>{inn.fall_of_wickets.join(" · ")}

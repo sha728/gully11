@@ -2,7 +2,7 @@
 // season so far, which the host moves on one match (or more) at a time.
 
 import { API_URL, type Role } from "@/lib/api";
-import type { Award, CaptainRecord, FullMatch } from "@/lib/xi";
+import type { Award, BowlOption, CaptainRecord, FullMatch } from "@/lib/xi";
 
 export interface SeasonPlayer {
   id: string;
@@ -26,7 +26,14 @@ export interface SetupTeam {
   impact: string | null;
   picked: boolean;
   captain: string | null;
+  choose: boolean;            // its person picks the bowler every over
+  impact_out: string | null;  // who the Impact Player replaces (null: the engine picks)
+  subs: string[];             // named substitutes (up to five); ``impact`` is the one chosen, null: engine picks
+  impact_when: ImpactWhen;
 }
+
+/** When the Impact sub comes on: the engine decides, the first ball, or the innings break. */
+export type ImpactWhen = "auto" | "start" | "break";
 
 export interface MatchSummary {
   match: number;
@@ -62,6 +69,27 @@ export interface Season {
   runner_up: { id: string; name: string } | null;
   caps: { orange: CapRow[]; purple: CapRow[]; mvp?: CapRow[] };
   format: string;
+  /** A match waiting for a captain to choose who bowls the next over. */
+  live?: SeasonWait | null;
+}
+
+export interface SeasonWait {
+  match: number;
+  home: string;
+  away: string;
+  stage: MatchSummary["stage"];
+  key: string;            // "<innings>:<over>"
+  over: number;           // 1-based
+  waiting: string;        // franchise id whose over it is
+}
+
+/** The waiting match so far; ``options`` only for the franchise whose over it is. */
+export interface SeasonLive extends SeasonWait {
+  match_json: FullMatch;
+  yours: boolean;
+  options?: BowlOption[];
+  suggested?: string;
+  innings?: number;
 }
 
 export interface Fixture { stage: MatchSummary["stage"]; home: string; away: string; match: number }
@@ -95,13 +123,23 @@ const base = (code: string) => `/rooms/${encodeURIComponent(code)}/season`;
 
 export const seasonApi = {
   get: (code: string, token: string | null) => call<SeasonView>(`${base(code)}${token ? `?token=${encodeURIComponent(token)}` : ""}`),
-  lineup: (code: string, token: string, xi: string[], impact: string | null, captain: string | null) =>
-    call<{ ok: boolean }>(`${base(code)}/lineup`, { method: "PUT", body: JSON.stringify({ token, xi, impact, captain }) }),
+  lineup: (code: string, token: string, xi: string[], impact: string | null, captain: string | null,
+           impactOut: string | null = null, impactWhen: ImpactWhen = "auto", subs: string[] = []) =>
+    call<{ ok: boolean }>(`${base(code)}/lineup`, {
+      method: "PUT",
+      body: JSON.stringify({ token, xi, impact, captain, impact_out: impactOut, impact_when: impactWhen, subs }),
+    }),
   start: (code: string, token: string | null) =>
     call<SeasonView>(`${base(code)}/start`, { method: "POST", body: JSON.stringify({ token }) }),
   advance: (code: string, token: string | null, how: "next" | "mine" | "end") =>
     call<SeasonView>(`${base(code)}/advance`, { method: "POST", body: JSON.stringify({ token, how }) }),
   match: (code: string, n: number) => call<FullMatch>(`${base(code)}/match/${n}`),
+  choose: (code: string, token: string, on: boolean) =>
+    call<SeasonView>(`${base(code)}/choose`, { method: "PUT", body: JSON.stringify({ token, on }) }),
+  live: (code: string, token: string | null) =>
+    call<SeasonLive>(`${base(code)}/live${token ? `?token=${encodeURIComponent(token)}` : ""}`),
+  bowl: (code: string, token: string, key: string, bowler: string) =>
+    call<SeasonView>(`${base(code)}/live/bowl`, { method: "POST", body: JSON.stringify({ token, key, bowler }) }),
 };
 
 // Matches of yours this browser has watched, so a fresh result of yours offers

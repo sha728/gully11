@@ -4,8 +4,8 @@ for the XI a person picks.
 Rules (IPL): eleven players, at most four overseas on the field (an overseas
 Impact sub only if the XI has three or fewer), a wicketkeeper, and at least five
 bowling options (bowlers and all-rounders, the Impact sub included); the last two
-only as far as the squad allows. The Impact sub
-is a bench bowler who bowls but doesn't bat.
+only as far as the squad allows. The Impact sub is a bench player who comes on
+for one of the XI (see sim.engine.impact_plan).
 
 ``players`` maps id -> {"id", "name", "role", "overseas", "fair", "opener", "bat",
 "bowl"}: ``bat`` and ``bowl`` are simulator-based strengths (see ``strengths``).
@@ -52,10 +52,24 @@ def _normalise(players: dict[str, dict]) -> None:
             p[out] = i / max(1, len(order) - 1)
 
 
-def check(players: dict[str, dict], xi: list[str], impact: str | None) -> None:
+IMPACT_WHEN = ("auto", "start", "break")
+MAX_SUBS = 5          # substitutes named with the XI; one may come on as the Impact Player
+
+
+def check(players: dict[str, dict], xi: list[str], impact: str | None,
+          impact_out: str | None = None, impact_when: str = "auto", subs: list[str] | None = None) -> None:
+    """``subs``: the named substitutes (default: just ``impact``); ``impact``: the one
+    you'll bring on (None: the engine picks one, knowing the toss)."""
+    subs = list(subs) if subs is not None else ([impact] if impact else [])
+    if len(subs) > MAX_SUBS or len(set(subs)) != len(subs):
+        raise LineupError(f"Name up to {MAX_SUBS} different substitutes.")
+    if any(s in xi for s in subs):
+        raise LineupError("Substitutes come from the bench.")
+    if impact and impact not in subs:
+        raise LineupError("Your Impact Player has to be one of your substitutes.")
     if len(xi) != 11 or len(set(xi)) != 11:
         raise LineupError("Pick exactly eleven different players.")
-    unknown = [i for i in xi + ([impact] if impact else []) if i not in players]
+    unknown = [i for i in xi + subs if i not in players]
     if unknown:
         raise LineupError("Those players aren't in your squad.")
     if impact in xi:
@@ -66,12 +80,17 @@ def check(players: dict[str, dict], xi: list[str], impact: str | None) -> None:
         raise LineupError(f"At most {MAX_OVERSEAS} overseas players in the XI.")
     if impact and players[impact]["overseas"] and os_xi >= MAX_OVERSEAS:
         raise LineupError("With four overseas players in the XI, the Impact sub must be Indian.")
+    if impact_out is not None and impact_out not in xi:
+        raise LineupError("The player your Impact sub replaces has to be in your XI.")
+    if impact_when not in IMPACT_WHEN:
+        raise LineupError("The Impact sub comes on at the start, at the innings break, or when the engine decides.")
     # A squad without a keeper (or five bowlers) can't be held to that rule: the
     # engine then gives the gloves to a batter.
     has_wk = any(p["role"] == "WK" for p in players.values())
     if has_wk and not any(p["role"] == "WK" for p in team):
         raise LineupError("Your XI needs a wicketkeeper.")
-    bowling = sum(p["role"] in WICKET_ROLES for p in team) + bool(impact and players[impact]["role"] in WICKET_ROLES)
+    sub_bowler = (players[impact]["role"] in WICKET_ROLES) if impact else any(players[s]["role"] in WICKET_ROLES for s in subs)
+    bowling = sum(p["role"] in WICKET_ROLES for p in team) + bool(sub_bowler)
     available = sum(p["role"] in WICKET_ROLES for p in players.values())
     if bowling < min(MIN_BOWLING, available):
         raise LineupError(f"You need at least {MIN_BOWLING} bowling options (bowlers and all-rounders, the Impact sub included).")
@@ -123,3 +142,21 @@ def auto(players: dict[str, dict]) -> tuple[list[str], str | None]:
              if p["id"] not in ids and p["role"] in WICKET_ROLES and not (p["overseas"] and os_xi >= MAX_OVERSEAS)]
     impact = bench[0]["id"] if bench else None
     return batting_order(players, ids), impact
+
+
+def auto_subs(players: dict[str, dict], xi: list[str]) -> list[str]:
+    """Five substitutes for the engine to choose its Impact Player from: the best
+    bench bowlers and batters (three and two, as far as the bench allows)."""
+    _normalise(players)
+    bench = [p for p in players.values() if p["id"] not in xi]
+    bowlers = sorted((p for p in bench if p["role"] in WICKET_ROLES), key=lambda p: -p["bowl_rank"])
+    batters = sorted((p for p in bench if p["role"] not in ("BOWL",)), key=lambda p: -p["bat_rank"])
+    out: list[str] = []
+    for group, n in ((bowlers, 3), (batters, 2), (bowlers + batters, MAX_SUBS)):
+        for p in group:
+            if len(out) >= MAX_SUBS or n <= 0:
+                break
+            if p["id"] not in out:
+                out.append(p["id"])
+                n -= 1
+    return out

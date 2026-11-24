@@ -85,3 +85,7 @@ CREATE TABLE IF NOT EXISTS xi_daily_entries (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS xi_daily_entries_board ON xi_daily_entries (format, day, points DESC, run_diff DESC, created_at);
+
+-- Bowling choices when you captain a T20 series over by over:
+-- {"<match>": {"<innings>:<over>": player id or "auto", "rest": "auto" once you sim the rest}}.
+ALTER TABLE xi_drafts ADD COLUMN IF NOT EXISTS bowling jsonb;

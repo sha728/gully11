@@ -20,7 +20,7 @@ from pathlib import Path
 from ..settings import settings
 from ..sim import captaincy
 from ..sim.awards import player_of_series
-from ..sim import Profile, Team, attach_matchups, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
+from ..sim import BowlerNeeded, Profile, Team, attach_matchups, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
 
 FULL_MEMBERS = ["India", "Australia", "England", "South Africa", "New Zealand", "Pakistan",
                 "Sri Lanka", "West Indies", "Bangladesh", "Zimbabwe", "Afghanistan", "Ireland"]
@@ -384,18 +384,23 @@ def world_xi(conn, fmt: str) -> Team:
                 captain=cap, captaincy=captaincy.rating(cap, fmt) if cap else 0.0)
 
 
-def challenge_slug(fmt: str, seed: int, picks: list[str], slots: list[int], captain: str | None = None) -> str:
+# Formats where you can captain the series yourself, choosing the bowler for every over.
+CAPTAIN_FORMATS = ("T20I", "IPL")
+
+
+def challenge_slug(fmt: str, seed: int, picks: list[str], slots: list[int], captain: str | None = None,
+                   bowling: dict | None = None) -> str:
     key = f"{fmt}:{seed}:{','.join(picks)}:{','.join(map(str, slots))}"
     if captain:
         key += f":c={captain}"        # same XI, different captain: a different challenge
+    if bowling:                       # your own bowling changes: a series of your own
+        key += ":b=" + json.dumps(bowling, sort_keys=True)
     return hashlib.blake2b(key.encode(), digest_size=6).hexdigest()
 
 
-def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
-                name: str = "Your XI", captain: str | None = None) -> dict:
-    """Validate, then play five seeded matches against the Greats, batting in the
-    chosen order, led by ``captain`` (one of the XI; default: the best-rated
-    captain in it). Returns a summary plus the full match records."""
+def _sides(conn, fmt: str, seed: int, picks: list[str], slots: list[int], name: str,
+           captain: str | None) -> tuple[list[dict], Team, Team, str]:
+    """The validated XI (batting order), your Team, the Greats and the captain's id."""
     ordered = validate(conn, fmt, seed, picks, slots)
     prof = profiles(conn, fmt, [r["id"] for r in ordered])
     keeper = next(r["id"] for r in ordered if r["role"] == "WK")
@@ -403,13 +408,37 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
         captain = captaincy.best(picks, fmt) or ordered[0]["id"]
     mine = Team(name, [prof[r["id"]] for r in ordered], keeper=keeper,
                 captain=captain, captaincy=captaincy.rating(captain, fmt))
-    them = world_xi(conn, fmt)
+    return ordered, mine, world_xi(conn, fmt), captain
+
+
+def _match_seed(fmt: str, seed: int, i: int) -> int:
+    return zlib.crc32(f"xi:{fmt}:{seed}:{i}".encode())
+
+
+def _captained(mine: Team, choices: dict | None) -> dict:
+    """simulate_match arguments for one match you captain (choices for that match)."""
+    choices = dict(choices or {})
+    rest = choices.pop("rest", None) == "auto"
+    return {"captain": mine.name, "bowling": choices, "fill_auto": rest}
+
+
+def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
+                name: str = "Your XI", captain: str | None = None, bowling: dict | None = None) -> dict:
+    """Validate, then play five seeded matches against the Greats, batting in the
+    chosen order, led by ``captain`` (one of the XI; default: the best-rated
+    captain in it). ``bowling``: your own bowling changes per match when you
+    captained it over by over (see live_match); any over left without one goes to
+    the engine. Returns a summary plus the full match records."""
+    ordered, mine, them, captain = _sides(conn, fmt, seed, picks, slots, name, captain)
     env = load_env(FORMATS[fmt].env)
     sim = simulate_test if env.is_test else simulate_match
 
     matches, tally = [], {"won": 0, "lost": 0, "drawn": 0, "tied": 0}
     for i in range(SERIES_MATCHES):
-        m = sim(mine, them, env, zlib.crc32(f"xi:{fmt}:{seed}:{i}".encode()))
+        extra = {}
+        if bowling and not env.is_test:
+            extra = {**_captained(mine, bowling.get(str(i + 1))), "fill_auto": True}
+        m = sim(mine, them, env, _match_seed(fmt, seed, i), **extra)
         if m.result == "draw":
             tally["drawn"] += 1
         elif m.winner is None:
@@ -429,7 +458,7 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
 
     full = [m.to_dict() for m in matches]
     return {
-        "slug": challenge_slug(fmt, seed, picks, slots, captain),
+        "slug": challenge_slug(fmt, seed, picks, slots, captain, bowling),
         "format": fmt, "seed": seed, "picks": picks, "slots": slots, "opponent": them.name,
         "captains": {"mine": lead(mine), "them": lead(them)},
         "xi": [{**r, "order": r["slot"]} for r in ordered],
@@ -438,6 +467,42 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
         "matches": [_summary(d, i + 1) for i, d in enumerate(full)],
         "_full": full,
     }
+
+
+class LiveError(Exception):
+    """A request to captain a match that can't be played yet (or at all)."""
+
+
+def live_match(conn, fmt: str, seed: int, picks: list[str], slots: list[int], captain: str | None,
+               bowling: dict | None, n: int, name: str = "Your XI") -> dict:
+    """Match ``n`` of a series you captain over by over, as far as your choices go.
+
+    Earlier matches must be finished. Returns {"n", "status", "match", ...}:
+    status "bowl" (``match`` is the match so far; ``key`` is the over to choose
+    for, ``options`` who may bowl it, ``suggested`` the engine's own pick) or
+    "done" (``match`` complete). ``series``: results of the matches before ``n``."""
+    if fmt not in CAPTAIN_FORMATS:
+        raise LiveError(f"Choosing your bowlers is for T20 series ({', '.join(CAPTAIN_FORMATS)}).")
+    if not 1 <= n <= SERIES_MATCHES:
+        raise LiveError(f"A series has {SERIES_MATCHES} matches.")
+    _, mine, them, _ = _sides(conn, fmt, seed, picks, slots, name, captain)
+    env = load_env(FORMATS[fmt].env)
+    bowling = bowling or {}
+    series = []
+    for i in range(n):
+        try:
+            m = simulate_match(mine, them, env, _match_seed(fmt, seed, i), **_captained(mine, bowling.get(str(i + 1))))
+        except BowlerNeeded as e:
+            if i + 1 < n:
+                raise LiveError(f"Finish match {i + 1} first.") from None
+            return {"n": n, "status": "bowl", "match": e.partial, "key": e.key, "over": e.over + 1,
+                    "innings": e.innings_no, "options": e.options, "suggested": e.suggested, "series": series}
+        d = m.to_dict()
+        if i + 1 < n:
+            series.append(_summary(d, i + 1))
+        else:
+            return {"n": n, "status": "done", "match": d, "series": series}
+    raise AssertionError("unreachable")
 
 
 def run_difference(matches: list[dict], mine: str = "Your XI") -> int:

@@ -163,15 +163,36 @@ def _caps(state: dict) -> dict:
     return {"orange": orange, "purple": purple, "mvp": mvp}
 
 
-def play_next(state: dict, teams: dict[str, Team], lineups: dict[str, dict], env: Env) -> dict | None:
+def simulate_next(state: dict, teams: dict[str, Team], env: Env, captains: dict[str, bool] | None = None):
+    """The next fixture simulated as far as the captains' bowling choices go (see
+    play_next). Changes nothing; raises BowlerNeeded at an over still to choose."""
+    fx = next_fixture(state)
+    n = len(state["matches"]) + 1
+    a, b = fx["home"], fx["away"]
+    caps = {f: rest for f, rest in (captains or {}).items() if f in (a, b)}
+    extra = {}
+    if caps:
+        extra = {"captain": {teams[f].name for f in caps},
+                 "bowling": state.get("bowling", {}).get(str(n), {}),
+                 "fill_auto": {teams[f].name for f, rest in caps.items() if rest}}
+    return simulate_match(teams[a], teams[b], env, seed=state["seed"] * 1000 + n, **extra)
+
+
+def play_next(state: dict, teams: dict[str, Team], lineups: dict[str, dict], env: Env,
+              captains: dict[str, bool] | None = None) -> dict | None:
     """Simulate the next fixture with the given Teams (franchise id -> Team, as they
-    are now). Updates ``state``; returns the full match, or None if it's over."""
+    are now). Updates ``state``; returns the full match, or None if it's over.
+
+    ``captains``: franchises in this fixture whose person chooses their bowler each
+    over (franchise id -> True once they've said "sim the rest"). Their choices so
+    far are ``state["bowling"][match number]``; with an over still to choose this
+    raises BowlerNeeded before changing anything."""
     fx = next_fixture(state)
     if fx is None:
         return None
     n = len(state["matches"]) + 1
     a, b = fx["home"], fx["away"]
-    m = simulate_match(teams[a], teams[b], env, seed=state["seed"] * 1000 + n)
+    m = simulate_next(state, teams, env, captains)
     full = m.to_dict()
     s = _summary(n, fx["stage"], m, {a: lineups[a], b: lineups[b]})
     state["matches"].append(s)

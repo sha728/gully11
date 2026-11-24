@@ -180,3 +180,70 @@ def test_season_end_to_end():
         assert client.put(f"{A}/lineup", json={"token": guest.token, "xi": changed}).status_code == 422   # over
         m = client.get(f"{A}/match/1").json()
         assert m["innings"] and m["commentary"]
+
+
+def test_season_waits_for_a_captains_bowling_change():
+    from fastapi.testclient import TestClient
+
+    from gully_api import db
+    from gully_api.auction.live import save_room
+    from gully_api.auction.pool import RULES, build_pool
+    from gully_api.auction.room import Room
+    from gully_api.main import app
+
+    with TestClient(app) as client:
+        with db._pool.connection() as conn:
+            pool = build_pool(conn, "mega", 4)
+        r = Room("SEASNB", "mega", RULES["mega"], pool, teams=4, humans=2, seed=6)
+        guest = r.claim("Guest")
+        r.start(0, r.host_token)
+        t = 0.0
+        while r.phase == "live":
+            for f in (r.by_token(r.host_token), guest):
+                if r.lot and f.id not in r.lot.passed and r.lot.leader != f.id:
+                    if r.lot.price is None and r.why_not(f) is None and len(f.squad) < 15:
+                        r.bid(f.id, r.next_amount(), t)
+                    else:
+                        r.pass_(f.id)
+            t += 0.5
+            r.tick(t)
+        with db._pool.connection() as conn:
+            conn.execute("DELETE FROM sim_results WHERE context = 'season' AND ref = 'SEASNB'")
+            conn.execute("DELETE FROM seasons WHERE code = 'SEASNB'")
+            conn.commit()
+        save_room(db._pool.connection)(r)
+
+        A = "/api/v1/rooms/SEASNB/season"
+        host = r.host_token
+        s = client.put(f"{A}/choose", json={"token": guest.token, "on": True}).json()
+        assert next(t for t in s["teams"] if t["id"] == guest.id)["choose"]
+        client.post(f"{A}/start", json={"token": host})
+        # Play on until the guest's side has to bowl: the season stops there.
+        for _ in range(20):
+            s = client.post(f"{A}/advance", json={"token": host, "how": "next"}).json()
+            if s["season"].get("live"):
+                break
+        wait = s["season"]["live"]
+        assert wait["waiting"] == guest.id
+        played = len(s["season"]["matches"])
+        assert client.post(f"{A}/advance", json={"token": host, "how": "next"}).json()["season"]["live"] == wait
+        # Only the guest sees who may bowl; the host can only sim it for them.
+        mine = client.get(f"{A}/live", params={"token": guest.token}).json()
+        theirs = client.get(f"{A}/live", params={"token": host}).json()
+        assert mine["yours"] and mine["options"] and "options" not in theirs
+        pick = mine["options"][0]["id"]
+        assert client.post(f"{A}/live/bowl", json={"token": host, "key": wait["key"], "bowler": pick}).status_code == 422
+        s = client.post(f"{A}/live/bowl", json={"token": guest.token, "key": wait["key"], "bowler": pick}).json()
+        nxt = s["season"].get("live")
+        assert nxt is None or nxt["key"] != wait["key"]
+        # The host lets the engine finish the match for them.
+        while s["season"].get("live") and len(s["season"]["matches"]) == played:
+            w = s["season"]["live"]
+            s = client.post(f"{A}/live/bowl", json={"token": host, "key": w["key"], "bowler": "rest"}).json()
+        assert len(s["season"]["matches"]) == played + 1
+        m = client.get(f"{A}/match/{played + 1}").json()
+        inns = int(wait["key"].split(":")[0])
+        over = int(wait["key"].split(":")[1])
+        names = {o["id"]: o["name"] for o in mine["options"]}
+        bowled = {e["bowler"] for e in m["commentary"] if e["inns"] == inns and e["ball"].startswith(f"{over}.")}
+        assert bowled == {names[pick]}

@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .awards import player_of_match
 from .commentary import describe
@@ -40,14 +40,34 @@ def _coverable(quota: dict[str, int], overs: int, last: str) -> bool:
     return sum(min(max(q, 0), cap[b]) for b, q in quota.items()) >= overs
 
 
+class BowlerNeeded(Exception):
+    """Raised when the side a person captains is about to bowl an over that has no
+    choice yet (see ``simulate_match(captain=..., bowling=...)``). ``partial`` is the
+    match so far (``MatchResult.to_dict`` shape, ``result`` = "in progress");
+    ``key`` is the over to choose for ("<innings>:<over>", over 0-based)."""
+
+    def __init__(self, key: str, innings_no: int, over: int, options: list[dict], suggested: str):
+        super().__init__(f"bowler needed for {key}")
+        self.key, self.innings_no, self.over = key, innings_no, over
+        self.options, self.suggested = options, suggested
+        self.partial: dict | None = None
+
+
 @dataclass
 class Team:
     name: str
     players: list[Profile]               # 11, in batting order
     bowlers: list[str] | None = None     # ids of designated bowlers (auto if None)
     keeper: str | None = None            # id (auto: first WK, else last batter)
-    # Bowling-only substitutes (IPL Impact Player): can bowl, never bat.
+    # IPL Impact Player. ``impact``: the named substitutes (up to five), one of whom
+    # may come on for one of the XI. ``impact_pick``: which one (None: the engine
+    # picks, knowing the toss); ``impact_out``: the XI player he replaces (None:
+    # the engine picks); ``impact_when``: "start" (before the first ball), "break"
+    # (at the innings break) or "auto". See impact_plan.
     impact: list[Profile] = field(default_factory=list)
+    impact_pick: str | None = None
+    impact_out: str | None = None
+    impact_when: str = "auto"
     captain: str | None = None           # id of the captain (in the XI)
     # Tactical skill of the captain, 0..1 (from their captaincy record; 0 = never
     # captained): the toss call and bowling changes. See sim/captaincy.py.
@@ -154,6 +174,8 @@ class MatchResult:
     result: str = "win"         # win / tie / draw / super over
     toss: dict | None = None    # {"winner", "decision", "captain", "called_right"}
     super_overs: list[Innings] = field(default_factory=list)   # in order played (pairs)
+    # Impact Players used: {"team", "in", "in_name", "out", "out_name", "when", "from_innings"}
+    impact: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = {
@@ -162,6 +184,7 @@ class MatchResult:
             "winner": self.winner, "margin": self.margin, "result": self.result,
             "commentary": self.commentary, "win_prob": self.win_prob, "toss": self.toss,
             "super_overs": [i.to_dict() for i in self.super_overs],
+            "impact": self.impact,
         }
         d["player_of_match"] = player_of_match(d, load_env(self.env).is_test)
         return d
@@ -202,10 +225,125 @@ def _aggression(v: list[float], a: float) -> list[float]:
     return [x / s for x in w]
 
 
+def _swap(team: Team, out: str, sub: Profile) -> Team:
+    """The team with ``sub`` playing instead of ``out`` (who takes no further part).
+    A batter takes the replaced player's place in the order; a bowler bats last."""
+    keeper = team.keeper
+    if out == team.keeper_id():
+        keeper = sub.id if sub.role == "WK" else None    # None: the next keeper in the side
+    bowlers = None
+    if team.bowlers or sub.role in WICKET_ROLES:
+        # A bowling sub is brought on to bowl: he's one of the side's six bowlers.
+        base = [b for b in (team.bowlers or team.bowling_options()) if b != out]
+        if sub.role in WICKET_ROLES:
+            base = [sub.id] + base[:5]
+        bowlers = list(dict.fromkeys(base))
+    if sub.role == "BOWL":
+        players = [p for p in team.players if p.id != out] + [sub]
+    else:
+        players = [sub if p.id == out else p for p in team.players]
+    if bowlers is not None:
+        on = {p.id for p in players}
+        bowlers = [b for b in bowlers if b in on]          # other named subs never play
+        bowlers = bowlers if len(bowlers) >= 5 else None
+    return replace(team, players=players, impact=[], keeper=keeper, bowlers=bowlers)
+
+
+def _bat_value(p: Profile) -> float:
+    rpb, wk = expected(p.bat["middle"])
+    return rpb / (wk + 0.01) ** 0.5                     # scoring, weighted by staying in
+
+
+def _bowl_value(p: Profile) -> float:
+    rpb, wk = expected(p.bowl["death"])
+    return 20 * wk - rpb
+
+
+def _choose_sub(team: Team, bats_first: bool) -> Profile:
+    """The named substitute to use: the one chosen, else the best at what the side
+    needs once the toss is known (batting first: a bowler for the second innings;
+    bowling first: a batter for the chase), else the first named."""
+    if team.impact_pick:
+        chosen = next((p for p in team.impact if p.id == team.impact_pick), None)
+        if chosen:
+            return chosen
+    if bats_first:
+        bowlers = [p for p in team.impact if p.role in WICKET_ROLES]
+        if bowlers:
+            return max(bowlers, key=_bowl_value)
+    else:
+        batters = [p for p in team.impact if p.role in ("BAT", "WK", "AR")]
+        if batters:
+            return max(batters, key=_bat_value)
+    return team.impact[0]
+
+
+def impact_plan(team: Team, bats_first: bool) -> dict | None:
+    """The IPL Impact Player rule: one of the (up to five) named substitutes may replace
+    one of the XI at a natural break (start of an innings, end of an over, fall of a wicket); the replaced
+    player takes no further part, and the substitute can bat and bowl a full quota.
+    Here the change is made at the start of the match or at the innings break.
+
+    ``team.impact_when`` "start" or "break" is done as asked, for ``team.impact_out``
+    (or, with none, the XI's weakest player at the sub's skill: for a bowling sub the
+    one who bowls least, for a batting sub the one who bats least).
+
+    "auto" plays it the way IPL sides do, since the XI is named after the toss: the
+    side gets its sub's skill in the innings that needs it and its full XI in the
+    other. A bowling sub on a side batting first comes on at the break; on a side
+    bowling first he is named in the XI instead of that weakest batter, who then comes
+    on at the break as the Impact Player for him (and the mirror for a batting sub).
+
+    Returns {"sides": {1: Team, 2: Team}, "record": {...}} (the XI in each innings
+    and who came on for whom: "in", "in_name", "out", "out_name", "when",
+    "from_innings"), or None without a sub."""
+    if not team.impact:
+        return None
+    sub = _choose_sub(team, bats_first)
+    sub_bowls = sub.role in WICKET_ROLES
+    out = team.impact_out if team.impact_out in {p.id for p in team.players} else None
+    if out is None:
+        keeper = team.keeper_id()
+        pool = [p for p in team.players if p.id != keeper]
+        if sub_bowls:
+            out = min(pool, key=lambda p: (p.role in WICKET_ROLES, p.balls_bowled)).id
+        else:
+            out = min(pool, key=lambda p: (p.role != "BOWL", p.balls_faced)).id
+    out_p = next(p for p in team.players if p.id == out)
+    xi = replace(team, impact=[])
+    swapped = _swap(team, out, sub)
+    when = team.impact_when
+    if when == "start":
+        sides, came_in, went_out, frm = {1: swapped, 2: swapped}, sub, out_p, 1
+    elif when == "break" or sub_bowls == bats_first:
+        sides, came_in, went_out, frm = {1: xi, 2: swapped}, sub, out_p, 2
+        when = "break"
+    else:                     # auto, and the sub is needed in the first innings
+        sides, came_in, went_out, frm = {1: swapped, 2: xi}, out_p, sub, 2
+        when = "break"
+    return {"sides": sides, "record": {"team": team.name, "in": came_in.id, "in_name": came_in.name,
+                                       "out": went_out.id, "out_name": went_out.name,
+                                       "when": when, "from_innings": frm}}
+
+
+def _side(team: Team, plan: dict | None, innings_no: int) -> Team:
+    """The XI a team fields in this innings (innings 3+ are super overs: as innings 2)."""
+    if plan is None:
+        return replace(team, impact=[]) if team.impact else team
+    return plan["sides"][min(innings_no, 2)]
+
+
 class _Match:
     def __init__(self, env: Env, seed: int, commentary: bool):
         self.env = env
         self.rng = random.Random(seed)
+        # A person captaining one side picks its bowler each over (limited overs):
+        # ``control`` = that team's name, ``bowling`` = their choices so far.
+        self.control: set[str] = set()
+        self.bowling: dict[str, str] = {}
+        self.fill_auto: set[str] = set()    # captained teams whose unchosen overs go to the engine
+        self.played: list[Innings] = []     # innings in the order started (for a pause)
+        self.impact: list[dict] = []        # Impact Players used (see MatchResult.impact)
         self.toss: dict | None = None
         self.with_commentary = commentary
         self.commentary: list[dict] = []
@@ -326,6 +464,32 @@ class _Match:
         total = sum(weights)
         return eligible[_pick(self.rng, [w / total for w in weights])]
 
+    def _captains_choice(self, team: Team, by_id: dict[str, Profile], inn: Innings, innings_no: int,
+                         over: int, last: str | None, left: dict[str, int], max_overs: int,
+                         spell: dict[str, int], keeper: str) -> str:
+        """The bowler a person chose for this over: their pick if it's still allowed
+        (anyone but the keeper, with overs left, not the bowler of the over just gone),
+        the engine's own pick for "auto" or a pick that's no longer allowed. No choice
+        yet: stop the match here (BowlerNeeded) so they can make one."""
+        key = f"{innings_no}:{over}"
+        allowed = [p.id for p in team.players + team.impact
+                   if p.id != keeper and left[p.id] > 0 and p.id != last]
+        choice = self.bowling.get(key)
+        if choice and choice != "auto" and choice in allowed:
+            return choice
+        if choice or team.name in self.fill_auto:            # "auto", no longer allowed, or sim the rest
+            return self.choose_bowler(team, by_id, inn, over, last, left, max_overs, spell)
+        suggested = self.choose_bowler(team, by_id, inn, over, last, left, max_overs, spell)
+        regular = set(team.bowling_options())
+        options = []
+        for pid in allowed:
+            p, bl = by_id[pid], inn.bowl[pid]
+            options.append({"id": pid, "name": p.name, "role": p.role, "kind": p.kind,
+                            "regular": pid in regular, "overs": bl.overs, "runs": bl.runs,
+                            "wickets": bl.wickets, "overs_left": left[pid]})
+        options.sort(key=lambda o: (not o["regular"], o["name"]))
+        raise BowlerNeeded(key, innings_no, over, options, suggested)
+
     # -- one innings -----------------------------------------------------
     def innings(self, bat_team: Team, bowl_team: Team, innings_no: int,
                 target: int | None, max_overs: int | None = None,
@@ -338,6 +502,9 @@ class _Match:
         env, rng = self.env, self.rng
         max_overs = env.overs if max_overs is None else max_overs
         inn = Innings(batting=bat_team.name, bowling=bowl_team.name, target=target)
+        if not super_over:
+            self.played.append(inn)
+        controlled = bowl_team.name in self.control and not super_over and not env.is_test
         batters = super_over[0] if super_over else bat_team.players
         max_wickets = len(batters) - 1
         for p in batters:
@@ -364,7 +531,7 @@ class _Match:
 
         # Luck: now and then the captain gives a batter who can bowl a middle over.
         hunch, hunch_over, announced = None, -1, False
-        if not env.is_test and not super_over:
+        if not env.is_test and not super_over and not controlled:
             arms = [p.id for p in bowl_team.players
                     if p.role not in WICKET_ROLES and p.id != keeper and p.wickets >= PART_TIMER_MIN_WICKETS]
             middle = [o for o in range(max_overs) if env.phase(o) == "middle"]
@@ -379,6 +546,9 @@ class _Match:
                 bid = super_over[1]
             elif over == hunch_over and hunch != last_bowler and left[hunch] > 0:
                 bid = hunch
+            elif controlled:
+                bid = self._captains_choice(bowl_team, by_id, inn, innings_no, over, last_bowler, left,
+                                            max_overs, spell, keeper)
             else:
                 bid = self.choose_bowler(bowl_team, by_id, inn, over, last_bowler, left, max_overs, spell)
             bowler = by_id[bid]
@@ -642,19 +812,50 @@ def _super_overs(m: "_Match", first: Team, second: Team, i1: Innings, i2: Inning
 
 def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
                    bat_first: int | None = None, commentary: bool = True,
-                   super_over: bool | None = None) -> MatchResult:
+                   super_over: bool | None = None, captain: "str | set[str] | None" = None,
+                   bowling: dict[str, str] | None = None, fill_auto: "bool | set[str]" = False) -> MatchResult:
     """Simulate one limited-overs match. ``bat_first``: 0 = team_a, 1 = team_b,
     None = decided by a seeded toss. ``super_over``: settle a tie with a super over
-    (default: in T20s, as in the IPL and T20Is; ODI ties stand)."""
+    (default: in T20s, as in the IPL and T20Is; ODI ties stand).
+
+    ``captain``: the name of a team a person captains (or a set of names: both
+    sides can be captained, since the innings says whose over it is). Each over that team bowls
+    uses their choice in ``bowling`` ("<innings>:<over>" -> player id or "auto");
+    the first over without one raises BowlerNeeded with the match so far. The
+    match is deterministic in (seed, choices), so it can be replayed to any point
+    and resumed by adding the next choice. ``fill_auto``: overs still without a
+    choice go to the engine's own pick instead of pausing ("sim the rest"): True for
+    every captained team, or a set of team names."""
     if isinstance(env, str):
         env = load_env(env)
     if env.is_test:
         raise ValueError(f"{env.name} is a Test environment; use simulate_test")
     m = _Match(env, seed, commentary)
+    m.control = {captain} if isinstance(captain, str) else set(captain or ())
+    m.fill_auto = set(m.control) if fill_auto is True else set(fill_auto or ())
+    m.bowling = dict(bowling or {})
+    try:
+        return _limited_overs(m, team_a, team_b, env, seed, bat_first, super_over)
+    except BowlerNeeded as e:
+        first = m.played[0]
+        e.partial = {
+            "seed": seed, "env": env.name, "teams": [first.batting, first.bowling],
+            "innings": [i.to_dict() for i in m.played], "winner": None, "margin": "",
+            "result": "in progress", "commentary": m.commentary, "win_prob": m.win_prob,
+            "toss": m.toss, "super_overs": [], "player_of_match": None, "impact": m.impact,
+        }
+        raise
+
+
+def _limited_overs(m: "_Match", team_a: Team, team_b: Team, env: Env, seed: int,
+                   bat_first: int | None, super_over: bool | None) -> MatchResult:
     if bat_first is None:
         bat_first, m.toss = _toss(m.rng, team_a, team_b, env)
     first, second = (team_a, team_b) if bat_first == 0 else (team_b, team_a)
-    i1 = m.innings(first, second, 1, None)
+    plans = {first.name: impact_plan(first, True), second.name: impact_plan(second, False)}
+    m.impact = [pl["record"] for pl in plans.values() if pl]
+    i1 = m.innings(_side(first, plans[first.name], 1), _side(second, plans[second.name], 1), 1, None)
+    first, second = _side(first, plans[first.name], 2), _side(second, plans[second.name], 2)
     i2 = m.innings(second, first, 2, i1.runs + 1)
 
     if i2.runs > i1.runs:
@@ -670,7 +871,7 @@ def simulate_match(team_a: Team, team_b: Team, env: Env | str, seed: int,
         result = "super over"
     return MatchResult(toss=m.toss, seed=seed, env=env.name, teams=(first.name, second.name),
                        innings=[i1, i2], winner=winner, margin=margin, result=result,
-                       commentary=m.commentary, win_prob=m.win_prob, super_overs=extra)
+                       commentary=m.commentary, win_prob=m.win_prob, super_overs=extra, impact=m.impact)
 
 
 # ---------------------------------------------------------------- Tests (beta)

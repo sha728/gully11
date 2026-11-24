@@ -29,8 +29,14 @@ cap tallies (plain JSON, updated each step); full matches are in `sim_results`
   bowling options (Impact sub included). The keeper and bowling rules apply only as
   far as the squad allows; a squad with no keeper gives the gloves to a batter, and
   one with fewer than eleven players fields replacements (role-prior profiles).
-- **Impact sub:** one bench bowler per team who bowls but doesn't bat; overseas only
-  if the XI has three or fewer overseas players.
+- **Impact Player:** each team names up to five substitutes from its bench; one of
+  them may come on for one of the XI, who takes no further part. He can bat and bowl
+  a full four overs, and only eleven players bat (IPL rule). You choose which sub
+  (or let the engine pick after the toss: a bowler when batting first, a batter
+  when chasing), who he replaces (or let the engine pick) and when: from the first
+  ball, at the innings break, or "when he's needed" (see docs/simulator.md). Bots
+  name their best three bench bowlers and two batters and let the engine choose. Overseas only if the XI has three or fewer overseas
+  players. Scorecards mark him "impact · in" and the replaced player "out".
 - **Engine's XI:** best players by role (batting and bowling strength from each
   player's simulator profile, ranked within the squad), never leaving a rule
   unmeetable; batting order: openers (tagged T20 openers first, a bowler who opens

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowDownIcon, ArrowUpIcon, CaretDownIcon, CrownIcon, FastForwardIcon, GavelIcon, PlayIcon, PlusIcon, SkipForwardIcon, TrophyIcon, XIcon,
+  CaretDownIcon, CrownIcon, FastForwardIcon, GavelIcon, PlayIcon, PlusIcon, SkipForwardIcon, TrophyIcon, XIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { ROLE_LABEL } from "@/lib/api";
 import { loadSeat, money } from "@/lib/auction";
 import { captainText } from "@/lib/xi";
-import { seasonApi, watched, type CapRow, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
+import { seasonApi, watched, type CapRow, type ImpactWhen, type MatchSummary, type Season, type SeasonPlayer, type SeasonView, type SetupTeam } from "@/lib/season";
 import { cn } from "@/lib/utils";
 
 export function SeasonRoom({ code }: { code: string }) {
@@ -76,7 +76,7 @@ function Setup({ code, view, token, setView }: { code: string; view: SeasonView;
         <h1 className="font-display text-5xl leading-[0.9] font-black uppercase sm:text-7xl">Pick your <span className="text-signal">XI</span></h1>
         <div className="seam mt-5" aria-hidden />
         <p className="mt-4 max-w-2xl text-muted-foreground">
-          Every franchise fields an XI and an Impact sub: a bench bowler who bowls but doesn&apos;t bat. Bots pick their best;
+          Every franchise fields an XI and an Impact Player: a bench player who comes on for one of the XI. Bots pick their best;
           yours starts as the engine&apos;s pick. You can change it now or between any of your matches.
         </p>
       </div>
@@ -105,7 +105,8 @@ function Setup({ code, view, token, setView }: { code: string; view: SeasonView;
   );
 }
 
-const xiKey = (t: SetupTeam) => `${t.xi.join(",")}|${t.impact ?? ""}|${t.captain ?? ""}`;
+const xiKey = (t: SetupTeam) => `${t.xi.join(",")}|${t.subs.join(",")}|${t.impact ?? ""}|${t.impact_out ?? ""}|${t.impact_when}|${t.captain ?? ""}`;
+const MAX_SUBS = 5;
 
 function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
   return (
@@ -120,7 +121,7 @@ function EveryXi({ teams, you }: { teams: SetupTeam[]; you: string | null }) {
             </div>
             <div className="mt-0.5 text-muted-foreground">
               {t.xi.map((id) => `${t.players.find((p) => p.id === id)?.name ?? ""}${id === t.captain ? " (c)" : ""}`).join(", ")}
-              {t.impact && <> · <span className="text-foreground">sub {t.players.find((p) => p.id === t.impact)?.name}</span></>}
+              {t.subs.length > 0 && <> · <span className="text-foreground">subs {t.subs.map((s) => t.players.find((p) => p.id === s)?.name).join(", ")}</span></>}
             </div>
           </li>
         ))}
@@ -138,23 +139,60 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
   const byId = useMemo(() => Object.fromEntries(team.players.map((p) => [p.id, p])), [team.players]);
   const [xi, setXi] = useState<string[]>(team.xi);
   const [impact, setImpact] = useState<string | null>(team.impact);
+  const [subs, setSubs] = useState<string[]>(team.subs);
+  const dropSub = (id: string) => { setSubs((s) => s.filter((x) => x !== id)); if (impact === id) setImpact(null); };
+  const [impactOut, setImpactOut] = useState<string | null>(team.impact_out);
+  const [impactWhen, setImpactWhen] = useState<ImpactWhen>(team.impact_when);
   const [captain, setCaptain] = useState<string | null>(team.captain);
+  const [choose, setChoose] = useState(team.choose);
+  const [chooseBusy, setChooseBusy] = useState(false);
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; msg?: string }>({ kind: justSaved ? "saved" : "idle" });
   const bench = team.players.filter((p) => !xi.includes(p.id));
   const os = xi.filter((id) => byId[id]?.overseas).length;
-  const bowling = xi.filter((id) => ["BOWL", "AR"].includes(byId[id]?.role)).length + (impact && ["BOWL", "AR"].includes(byId[impact]?.role) ? 1 : 0);
+  const bowling = xi.filter((id) => ["BOWL", "AR"].includes(byId[id]?.role)).length
+    + ((impact ? [impact] : subs).some((id) => ["BOWL", "AR"].includes(byId[id]?.role)) ? 1 : 0);
   const keeper = xi.some((id) => byId[id]?.role === "WK");
   const squadHasKeeper = team.players.some((p) => p.role === "WK");
   const bowlingNeeded = Math.min(5, team.players.filter((p) => ["BOWL", "AR"].includes(p.role)).length);
   const short = team.players.length < 11;
 
-  const move = (i: number, d: number) => setXi((x) => { const y = [...x]; [y[i], y[i + d]] = [y[i + d], y[i]]; return y; });
   const changed = () => setState({ kind: "idle" });
+  // Tap a player, then tap where they should go (as in the XI Builder): two XI
+  // players swap batting positions; a bench player takes an XI player's place.
+  const [held, setHeld] = useState<{ xi: number } | { bench: string } | null>(null);
+  function tapXi(i: number) {
+    if (held === null) return setHeld({ xi: i });
+    if ("xi" in held) {
+      if (held.xi !== i) setXi((x) => { const y = [...x]; [y[held.xi], y[i]] = [y[i], y[held.xi]]; return y; });
+    } else {
+      const incoming = held.bench;
+      setXi((x) => x.map((id, k) => (k === i ? incoming : id)));
+      dropSub(incoming);
+    }
+    setHeld(null);
+    changed();
+  }
+  function tapBench(id: string) {
+    if (held === null) return setHeld({ bench: id });
+    if ("xi" in held) {
+      const at = held.xi;
+      setXi((x) => x.map((y, k) => (k === at ? id : y)));
+      dropSub(id);
+      setHeld(null);
+      changed();
+      return;
+    }
+    setHeld(held.bench === id ? null : { bench: id });
+  }
+  const heldName = held && ("xi" in held ? byId[xi[held.xi]]?.name : byId[held.bench]?.name);
 
   async function save() {
     setState({ kind: "saving" });
     try {
-      await seasonApi.lineup(code, token, xi, impact, captain && xi.includes(captain) ? captain : null);
+      const named = subs.filter((s) => !xi.includes(s));
+      await seasonApi.lineup(code, token, xi, impact && named.includes(impact) ? impact : null,
+        captain && xi.includes(captain) ? captain : null,
+        named.length && impactOut && xi.includes(impactOut) ? impactOut : null, named.length ? impactWhen : "auto", named);
       setState({ kind: "saved" });
       onSaved();
     } catch (e) {
@@ -181,48 +219,113 @@ function XiEditor({ code, team, token, onSaved, justSaved = false }: {
             <span className="text-muted-foreground">{byId[captain].captaincy ? captainText(byId[captain].captaincy!) : "no IPL or T20I captaincy record"}</span></>
         ) : <span className="text-muted-foreground">tap C on a player (calls the toss and runs the bowling; a better real record, fewer bad calls)</span>}
       </div>
+      <p className={cn("font-mono text-[11px]", held ? "text-signal" : "text-muted-foreground")} aria-live="polite">
+        {held ? <>Moving {heldName}: tap the spot {"xi" in held ? "to swap with" : "they should take"}, or tap them again to cancel.</>
+          : "Tap a player, then tap where they should bat. Tap a bench player, then the player they replace."}
+      </p>
       <ol className="divide-y border-y">
         {xi.map((id, i) => {
           const p = byId[id];
+          const isHeld = held !== null && "xi" in held && held.xi === i;
           return (
-            <li key={id} className="flex items-center gap-2 py-1.5">
-              <span className="w-6 font-display text-lg font-bold text-muted-foreground tnum">{i + 1}</span>
-              <PlayerName p={p} />
+            <li key={id} className={cn("flex items-center gap-2 py-1.5", isHeld && "bg-signal-soft", held && !isHeld && "hover:bg-muted")}>
+              <button type="button" onClick={() => tapXi(i)} aria-pressed={isHeld}
+                aria-label={held && !isHeld ? `Put ${heldName} at number ${i + 1}` : `Move ${p.name}`}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <span className={cn("w-6 font-display text-lg font-bold tnum", isHeld ? "text-signal" : "text-muted-foreground")}>{i + 1}</span>
+                <PlayerName p={p} />
+              </button>
               <Button variant={captain === id ? "default" : "ghost"} size="icon" className="size-7 font-mono text-[10px] font-bold"
                 onClick={() => { setCaptain(captain === id ? null : id); changed(); }} aria-pressed={captain === id}
                 title={captain === id ? "Captain" : "Make captain"} aria-label={`Make ${p.name} captain`}>C</Button>
-              <Button variant="ghost" size="icon" className="size-7" disabled={i === 0} onClick={() => { move(i, -1); changed(); }} aria-label={`Move ${p.name} up`}><ArrowUpIcon /></Button>
-              <Button variant="ghost" size="icon" className="size-7" disabled={i === xi.length - 1} onClick={() => { move(i, 1); changed(); }} aria-label={`Move ${p.name} down`}><ArrowDownIcon /></Button>
-              <Button variant="ghost" size="icon" className="size-7" onClick={() => { setXi((x) => x.filter((y) => y !== id)); changed(); }} aria-label={`Drop ${p.name}`}><XIcon /></Button>
+              <Button variant="ghost" size="icon" className="size-7" onClick={() => { setXi((x) => x.filter((y) => y !== id)); setHeld(null); changed(); }} aria-label={`Drop ${p.name}`}><XIcon /></Button>
             </li>
           );
         })}
       </ol>
       <div className="space-y-2">
-        <div className="label">Bench · pick the Impact sub (a bowler)</div>
+        <div className="label">Bench · name up to {MAX_SUBS} substitutes ({subs.length}/{MAX_SUBS})</div>
         <ul className="divide-y border-y">
-          {bench.map((p) => (
-            <li key={p.id} className="flex items-center gap-2 py-1.5">
-              <PlayerName p={p} />
-              {["BOWL", "AR"].includes(p.role) && (
-                <Button size="sm" variant={impact === p.id ? "default" : "outline"} className="h-7 font-mono text-[10px] uppercase"
-                  onClick={() => { setImpact(impact === p.id ? null : p.id); changed(); }}>
-                  {impact === p.id ? "Impact sub" : "Make sub"}
-                </Button>
-              )}
+          {bench.map((p) => {
+            const isHeld = held !== null && "bench" in held && held.bench === p.id;
+            return (
+            <li key={p.id} className={cn("flex items-center gap-2 py-1.5", isHeld && "bg-signal-soft", held && "xi" in held && "hover:bg-muted")}>
+              <button type="button" onClick={() => tapBench(p.id)} aria-pressed={isHeld}
+                aria-label={held && "xi" in held ? `Bring ${p.name} in for ${heldName}` : `Move ${p.name} into the XI`}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <PlayerName p={p} />
+              </button>
+              <Button size="sm" variant={subs.includes(p.id) ? "default" : "outline"} className="h-7 font-mono text-[10px] uppercase"
+                disabled={!subs.includes(p.id) && subs.length >= MAX_SUBS} aria-pressed={subs.includes(p.id)}
+                onClick={() => { if (subs.includes(p.id)) dropSub(p.id); else setSubs((s) => [...s, p.id]); changed(); }}>
+                {subs.includes(p.id) ? "Sub ✓" : "Name as sub"}
+              </Button>
               <Button size="sm" variant="ghost" className="h-7 font-mono text-[10px] uppercase" disabled={xi.length >= 11}
-                onClick={() => { setXi((x) => [...x, p.id]); if (impact === p.id) setImpact(null); changed(); }}>
+                onClick={() => { setXi((x) => [...x, p.id]); dropSub(p.id); changed(); }}>
                 <PlusIcon />XI
               </Button>
             </li>
-          ))}
+            );
+          })}
         </ul>
+        {subs.length > 0 && (
+          <div className="space-y-3 border border-signal/40 bg-signal/5 p-3 text-sm">
+            <label className="block space-y-1">
+              <span className="label block">Impact Player</span>
+              <select value={impact && subs.includes(impact) ? impact : ""} className="h-9 w-full border bg-background px-2"
+                onChange={(e) => { setImpact(e.target.value || null); changed(); }}>
+                <option value="">Let the engine pick after the toss (a bowler if you bat first, a batter if you chase)</option>
+                {subs.map((id) => <option key={id} value={id}>{byId[id]?.name} · {ROLE_LABEL[byId[id]?.role].toLowerCase()}</option>)}
+              </select>
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="label block">Comes on for</span>
+                <select value={impactOut && xi.includes(impactOut) ? impactOut : ""} className="h-9 w-full border bg-background px-2"
+                  onChange={(e) => { setImpactOut(e.target.value || null); changed(); }}>
+                  <option value="">Let the engine pick</option>
+                  {xi.map((id) => <option key={id} value={id}>{byId[id]?.name}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="label block">When</span>
+                <select value={impactWhen} className="h-9 w-full border bg-background px-2"
+                  onChange={(e) => { setImpactWhen(e.target.value as ImpactWhen); changed(); }}>
+                  <option value="auto">When he&apos;s needed (engine decides)</option>
+                  <option value="start">From the first ball</option>
+                  <option value="break">At the innings break</option>
+                </select>
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              IPL rule: you name up to five substitutes and one of them may come on as the Impact Player. He replaces one of your XI,
+              who takes no further part; he can bat and bowl a full four overs, and only eleven of your players bat. With four overseas
+              players in your XI he must be Indian. &ldquo;When he&apos;s needed&rdquo; plays it like IPL sides do: a bowler comes on for the
+              innings you bowl, a batter for the innings you bat.
+            </p>
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={save} disabled={short || xi.length !== 11 || state.kind === "saving"} className="font-mono uppercase">
           {state.kind === "saving" ? "Saving…" : "Save my XI"}
         </Button>
-        <Button variant="ghost" onClick={() => { setXi(team.xi); setImpact(team.impact); setCaptain(team.captain); changed(); }}>Undo changes</Button>
+        <Button variant="ghost" onClick={() => { setXi(team.xi); setSubs(team.subs); setImpact(team.impact); setImpactOut(team.impact_out); setImpactWhen(team.impact_when); setCaptain(team.captain); changed(); }}>Undo changes</Button>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={choose} disabled={chooseBusy} className="size-4 accent-[var(--signal)]"
+            onChange={async (e) => {
+              const box = e.target, on = box.checked;
+              setChooseBusy(true);
+              setState({ kind: "idle" });
+              try { await seasonApi.choose(code, token, on); setChoose(on); onSaved(); }
+              catch (err) {
+                box.checked = !on;                       // didn't save: show it as it was
+                setState({ kind: "error", msg: err instanceof Error ? err.message : "Couldn't change that." });
+              }
+              finally { setChooseBusy(false); }
+            }} />
+          Choose my bowler every over
+        </label>
         {state.kind === "saved" && <span className="text-sm text-signal">Saved: used from your next match.</span>}
         {state.kind === "error" && <span className="text-sm text-destructive">{state.msg}</span>}
       </div>
@@ -279,7 +382,8 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
     if (new URLSearchParams(window.location.search).has("xi")) openXi();
   }, []);
   const xiNames = mineTeam ? mineTeam.xi.map((id) => `${mineTeam.players.find((p) => p.id === id)?.name ?? ""}${id === mineTeam.captain ? " (c)" : ""}`) : [];
-  const subName = mineTeam?.impact ? mineTeam.players.find((p) => p.id === mineTeam.impact)?.name : null;
+  const subName = mineTeam?.impact ? mineTeam.players.find((p) => p.id === mineTeam.impact)?.name
+    : mineTeam?.subs.length ? "engine picks" : null;
 
   async function step(how: "next" | "mine" | "end", thenWatch = false) {
     setBusy(true);
@@ -287,7 +391,8 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
     try {
       const v = await seasonApi.advance(code, token, how);
       setView(v);
-      if (thenWatch) router.push(`/auction/${code}/season/match/${v.season!.matches.length}?live=1`);
+      if (v.season?.live && v.season.live.waiting === you) router.push(`/auction/${code}/season/live`);
+      else if (thenWatch && !v.season?.live) router.push(`/auction/${code}/season/match/${v.season!.matches.length}?live=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't move the season on.");
     } finally {
@@ -334,6 +439,28 @@ function SeasonBoard({ code, view, token, setView }: { code: string; view: Seaso
         <div className="flex flex-wrap items-center gap-3 border border-signal/50 bg-signal/5 px-4 py-3">
           <span className="flex-1 text-sm">Your match against <b>{idOf[unwatched.teams.find((t) => t !== youName)!]}</b> has been played.</span>
           <Button asChild className="font-mono uppercase"><Link href={`/auction/${code}/season/match/${unwatched.match}?live=1`}><PlayIcon weight="fill" />Watch it live</Link></Button>
+        </div>
+      )}
+
+      {season.live && (
+        <div className="flex flex-wrap items-center gap-3 border border-signal/50 bg-signal/5 px-4 py-3">
+          <span className="flex-1 text-sm">
+            Match {season.live.match}: {season.live.waiting === you ? <b>your</b> : <b>{idOf[season.live.waiting] ?? "a"}</b>}{" "}
+            captain to choose who bowls over {season.live.over}. The season waits until they do.
+          </span>
+          <Button asChild className="font-mono uppercase">
+            <Link href={`/auction/${code}/season/live`}>{season.live.waiting === you ? "Choose your bowler" : "Watch"}</Link>
+          </Button>
+          {view.host && season.live.waiting !== you && (
+            <Button variant="ghost" disabled={busy} className="font-mono uppercase" onClick={async () => {
+              if (!token || !season.live) return;
+              setBusy(true);
+              setError(null);
+              try { setView(await seasonApi.bowl(code, token, season.live.key, "rest")); }
+              catch (e) { setError(e instanceof Error ? e.message : "Couldn't sim it."); }
+              finally { setBusy(false); }
+            }}>Sim it for them</Button>
+          )}
         </div>
       )}
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -19,11 +19,25 @@ class Lineup(BaseModel):
     xi: list[str] = Field(min_length=11, max_length=11)
     impact: str | None = None
     captain: str | None = None       # one of the XI; None = the best-rated captain in it
+    impact_out: str | None = None    # who the Impact sub replaces; None = the engine picks
+    impact_when: Literal["auto", "start", "break"] = "auto"
+    subs: list[str] | None = Field(default=None, max_length=5)   # named substitutes; None: just ``impact``
 
 
 class Step(BaseModel):
     token: str | None = None
     how: str = "next"            # next | mine | end
+
+
+class Choose(BaseModel):
+    token: str
+    on: bool
+
+
+class Bowl(BaseModel):
+    token: str
+    key: str = Field(pattern=r"^[12]:\d{1,2}$")     # "<innings>:<over>"
+    bowler: str = Field(min_length=1, max_length=40)  # player id, "auto" or "rest"
 
 
 def _room(conn, code: str) -> dict:
@@ -51,11 +65,51 @@ def set_lineup(code: str, req: Lineup, conn=Depends(get_conn)) -> dict[str, Any]
     if fid is None:
         raise HTTPException(403, "You didn't run a franchise in this auction.")
     try:
-        S.save_lineup(conn, room, fid, req.xi, req.impact, req.captain)
+        S.save_lineup(conn, room, fid, req.xi, req.impact, req.captain, req.impact_out, req.impact_when, req.subs)
     except S.SeasonError as e:
         raise HTTPException(422, str(e)) from e
     conn.commit()
     return {"ok": True, "franchise": fid}
+
+
+@router.put("/choose")
+def choose_bowlers(code: str, req: Choose, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Choose your bowler every over in your matches (on), or leave it to the engine."""
+    room = _room(conn, code)
+    fid = S.seat_of(room, req.token)
+    if fid is None:
+        raise HTTPException(403, "You didn't run a franchise in this auction.")
+    try:
+        S.set_choose(conn, room, fid, req.on)
+    except S.SeasonError as e:
+        raise HTTPException(422, str(e)) from e
+    conn.commit()
+    return S.view(conn, room, req.token)
+
+
+@router.get("/live")
+def live(code: str, token: str | None = None, conn=Depends(get_conn)) -> dict[str, Any]:
+    """The match waiting on a captain's bowling change, as far as it has got."""
+    room = _room(conn, code)
+    try:
+        return S.live(conn, room, token)
+    except S.SeasonError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.post("/live/bowl")
+def live_bowl(code: str, req: Bowl, conn=Depends(get_conn)) -> dict[str, Any]:
+    """Choose the bowler for the over the season is waiting on; the season then
+    plays on to the next over you bowl, or to the end of the match."""
+    room = _room(conn, code)
+    conn.execute("SELECT 1 FROM seasons WHERE code = %s FOR UPDATE", (room["code"],))   # one step at a time
+    room = _room(conn, code)
+    try:
+        S.bowl(conn, room, req.token, req.key, req.bowler)
+    except S.SeasonError as e:
+        raise HTTPException(409 if "already" in str(e) else 422, str(e)) from e
+    conn.commit()
+    return S.view(conn, room, req.token)
 
 
 @router.post("/start")

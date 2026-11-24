@@ -1,13 +1,13 @@
 "use client";
 
-import { ArrowsDownUpIcon, CheckIcon, CircleIcon, CrosshairIcon, SpinnerGapIcon, TrophyIcon, XIcon } from "@phosphor-icons/react";
+import { ArrowsDownUpIcon, CheckIcon, CircleIcon, CrosshairIcon, CrownSimpleIcon, SpinnerGapIcon, TrophyIcon, XIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fmt, ROLE_LABEL } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { captainText, isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView, type LineupSlot, type XIFormat, rememberDaily } from "@/lib/xi";
+import { CAPTAIN_FORMATS, captainText, isOverseas, KEEPER_SLOT, XI_COPY, xiApi, type Challenge, type DraftCandidate, type DraftView, type LineupSlot, type XIFormat, rememberDaily } from "@/lib/xi";
 
 const MAX_OVERSEAS = 4;
 const ROLL_MS = 1100;
@@ -362,6 +362,12 @@ export function DraftBoard({ initial, rival }: { initial: DraftView; rival: Chal
         {moving !== null && (
           <Button variant="ghost" onClick={() => setMoving(null)} className="font-mono uppercase">
             <ArrowsDownUpIcon />Cancel move
+          </Button>
+        )}
+        {CAPTAIN_FORMATS.includes(d.format) && (
+          <Button size="lg" variant="outline" disabled={!status.ready || busy} className="h-11 px-6 font-mono uppercase"
+            onClick={() => router.push(`/xi/d/${d.id}/live/1`)}>
+            <CrownSimpleIcon />Captain it yourself
           </Button>
         )}
         <Button size="lg" disabled={!status.ready || busy} onClick={play} className="h-11 px-6 font-mono uppercase">

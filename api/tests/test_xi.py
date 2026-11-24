@@ -201,3 +201,34 @@ def test_daily_leaderboard(client):
     plain = fill(client, draft(client, format="ODI", seed=777))
     client.post(f"{X}/drafts/{plain['id']}/play")
     assert client.get(f"{X}/leaderboard/ODI", params={"draft": plain["id"]}).json()["you"] is None
+
+
+def test_captain_the_series_over_by_over(client):
+    d = fill(client, draft(client, format="IPL", seed=4242))
+    base = f"{X}/drafts/{d['id']}/live"
+    assert client.get(f"{base}/2").status_code == 422          # match 1 first
+    s = client.get(f"{base}/1").json()
+    assert s["status"] == "bowl" and s["suggested"] in {o["id"] for o in s["options"]}
+    first_key = s["key"]
+    inns, over = (int(x) for x in first_key.split(":"))
+    # Bowl that over yourself with someone the engine wouldn't have picked.
+    pick = next(o for o in s["options"] if o["id"] != s["suggested"])
+    s = client.post(f"{base}/1/bowl", json={"key": first_key, "bowler": pick["id"]}).json()
+    assert client.post(f"{base}/1/bowl", json={"key": first_key, "bowler": pick["id"]}).status_code == 409
+    assert s["status"] == "bowl" and s["key"] != first_key
+    bowled = {e["bowler"] for e in s["match"]["commentary"] if e["inns"] == inns and e["ball"].startswith(f"{over}.")}
+    assert bowled == {pick["name"]}
+    # Sim the rest of match 1: it's finished and match 2 opens.
+    s = client.post(f"{base}/1/bowl", json={"key": s["key"], "bowler": "rest"}).json()
+    assert s["status"] == "done"
+    live_one = s["match"]["commentary"]
+    assert client.get(f"{base}/2").json()["status"] == "bowl"
+    # Playing the series keeps your choices; after that the draft is closed.
+    a = client.post(f"{X}/drafts/{d['id']}/play").json()
+    assert client.get(f"{X}/challenge/{a['slug']}/match/1").json()["commentary"] == live_one
+    assert client.get(f"{base}/1").status_code == 409
+
+
+def test_only_t20_series_can_be_captained(client):
+    d = fill(client, draft(client, format="ODI", seed=7))
+    assert client.get(f"{X}/drafts/{d['id']}/live/1").status_code == 422

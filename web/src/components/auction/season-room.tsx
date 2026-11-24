@@ -505,6 +505,9 @@ function ResultRow({ code, m, idOf, youName }: { code: string; m: MatchSummary; 
         <span className="min-w-0 flex-1">
           <span className="font-mono tnum">{m.scores.map((s) => `${idOf[s.team]} ${s.runs}/${s.wickets}`).join(" · ")}</span>
           <span className="block truncate text-muted-foreground">{m.winner ? `${idOf[m.winner]} ${m.margin}` : m.margin || "Tied"}</span>
+          {m.player_of_match && (
+            <span className="block truncate text-muted-foreground">Player of the match: {m.player_of_match.name} {m.player_of_match.figures}</span>
+          )}
         </span>
         {mine && <Badge variant={won ? "default" : "outline"} className="font-mono text-[9px]">{won ? "WON" : m.winner ? "LOST" : "TIED"}</Badge>}
       </Link>
@@ -551,7 +554,9 @@ function Caps({ season, idOf, youName }: { season: Season; idOf: Record<string, 
     </section>
   );
   return (
-    <div className="grid gap-10 md:grid-cols-2">
+    <div className="grid gap-10 md:grid-cols-2 xl:grid-cols-3">
+      {season.caps.mvp && list("Player of the season · most impact", "oklch(0.8 0.15 90)", season.caps.mvp, ["Impact", "PoM"],
+        (r) => [String(Math.round(r.score ?? 0)), String(r.awards ?? 0)])}
       {list("Orange Cap · most runs", "oklch(0.75 0.17 60)", season.caps.orange, ["Runs", "SR"],
         (r) => [String(r.runs ?? 0), r.sr != null ? r.sr.toFixed(1) : "–"])}
       {list("Purple Cap · most wickets", "oklch(0.6 0.2 300)", season.caps.purple, ["Wkts", "Econ"],

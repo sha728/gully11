@@ -2,7 +2,7 @@
 // season so far, which the host moves on one match (or more) at a time.
 
 import { API_URL, type Role } from "@/lib/api";
-import type { CaptainRecord, FullMatch } from "@/lib/xi";
+import type { Award, CaptainRecord, FullMatch } from "@/lib/xi";
 
 export interface SeasonPlayer {
   id: string;
@@ -38,6 +38,7 @@ export interface MatchSummary {
   scores: { team: string; runs: number; wickets: number; overs: string }[];
   top_scorer: { name: string; runs: number; balls: number };
   best_bowler: { name: string; wickets: number; runs: number };
+  player_of_match?: Award | null;
   lineups: Record<string, { xi: string[]; impact: string | null; picked: boolean; captain?: string | null }>;
 }
 
@@ -45,6 +46,7 @@ export interface CapRow {
   id: string; name: string; team: string;
   runs?: number; balls?: number; sr?: number | null;     // Orange Cap: runs, balls faced, strike rate
   wickets?: number; econ?: number | null;                // Purple Cap: wickets, economy
+  score?: number; awards?: number; matches?: number;     // Player of the season: impact, player-of-match awards
 }
 
 export interface TableRow {
@@ -58,7 +60,7 @@ export interface Season {
   table: TableRow[];
   champion: { id: string; name: string } | null;
   runner_up: { id: string; name: string } | null;
-  caps: { orange: CapRow[]; purple: CapRow[] };
+  caps: { orange: CapRow[]; purple: CapRow[]; mvp?: CapRow[] };
   format: string;
 }
 

@@ -37,8 +37,9 @@ def load_room(conn, code: str) -> dict:
         conn.execute("DELETE FROM sim_results WHERE context = 'season' AND ref = %s", (row["code"],))
         season = {**season, "result": None}
     state = season["result"]
-    if state and any("balls" not in w for w in state["tally"]["wickets"].values()):
-        # Tallies from before balls bowled were counted: rebuild them from the matches.
+    if state and (any("balls" not in w for w in state["tally"]["wickets"].values())
+                  or "impact" not in state["tally"]):
+        # Tallies from before balls bowled (or player impact) were counted: rebuild them.
         state["tally"] = {"runs": {}, "wickets": {}}
         for r in conn.execute("SELECT match_json FROM sim_results WHERE context = 'season' AND ref = %s "
                               "ORDER BY match_no", (row["code"],)).fetchall():

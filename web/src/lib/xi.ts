@@ -91,6 +91,16 @@ export interface DraftView {
   status: { picked: number; openers: number; keeper_top6: boolean; overseas: number | null; ready: boolean };
 }
 
+/** Player of the match (or series): best impact score, see api sim/awards.py. */
+export interface Award {
+  id: string;
+  name: string;
+  team: string;
+  score: number;
+  figures: string;          // "87* (52) and 2/24", or for a series "312 runs and 4 wickets"
+  matches?: number;
+}
+
 export interface MatchSummary {
   match: number;
   winner: string | null;
@@ -99,6 +109,7 @@ export interface MatchSummary {
   scores: { team: string; runs: number; wickets: number; overs: string; declared: boolean }[];
   top_scorer: { name: string; runs: number; balls: number };
   best_bowler: { name: string; wickets: number; runs: number };
+  player_of_match?: Award | null;
 }
 
 export interface SeriesResult {
@@ -107,6 +118,7 @@ export interface SeriesResult {
   drawn: number;
   tied: number;
   verdict: string;
+  player_of_series?: Award | null;   // missing on series played before awards existed
 }
 
 export interface Challenge {
@@ -168,6 +180,7 @@ export interface FullMatch {
   win_prob: [string, number][];
   /** A tie settled by super overs: their innings, in order (one over each). */
   super_overs?: InningsCard[];
+  player_of_match?: Award | null;
   toss?: { winner: string; decision: "bat" | "bowl"; captain: string | null; called_right: boolean } | null;
 }
 

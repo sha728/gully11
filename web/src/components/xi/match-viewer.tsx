@@ -111,6 +111,15 @@ export function MatchStage({ match, format, live, who, you, kicker, summary, aft
         {revealed && match.result === "draw" && match.margin.includes(": ") && (
           <p className="mt-1 font-mono text-xs text-muted-foreground">Drawn: {match.margin.split(": ")[1]}.</p>
         )}
+        {revealed && match.player_of_match && (
+          <p className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="label">Player of the match</span>
+            <span className="font-display text-2xl font-bold uppercase">{match.player_of_match.name}</span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {who(match.player_of_match.team)} · {match.player_of_match.figures}
+            </span>
+          </p>
+        )}
       </div>
 
       {revealed && live && after}

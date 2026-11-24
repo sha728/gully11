@@ -6042,6 +6042,7 @@ cricinfo_id,name_en,wikipedia_title,country
 13492,William Gunn,William Gunn (cricketer),England
 13494,George Gutteres,George Gutteres,England
 13496,Simon Guy,Simon Guy,England
+13497,David Gwynne,David Gwynne,England
 13500,James Garner,James Garner (cricketer),England
 13506,Leslie Gale,Leslie Gale,England
 13509,Paul Goodwin,Paul Goodwin (cricketer),England
@@ -6264,6 +6265,7 @@ cricinfo_id,name_en,wikipedia_title,country
 13940,Robert Groom,Robert Groom (cricketer),England
 13942,Joseph Grout,Joseph Grout,England
 13946,Pearkes Gundry,Pearkes Gundry,
+13952,Joe Greenhalgh,Joe Greenhalgh,England
 13954,Andy Gray,Andy Gray (cricketer),England
 13956,Alex Gidman,Alex Gidman,New Zealand
 13958,Karl Geary,Karl Geary (cricketer),England
@@ -11241,11 +11243,13 @@ cricinfo_id,name_en,wikipedia_title,country
 23460,Luke Wright,Luke Wright,England
 23461,Alex Wyatt,"Alex Wyatt (cricketer, born 1976)",Australia
 23462,Dean Williams,Dean Williams (cricketer),England
+23466,Nick Weekes,Nick Weekes,England
 23468,Simon Webb,Simon Webb (cricketer),England
 23476,Stephen Watts,Stephen Watts (cricketer),England
 23477,Daniel Williams,Daniel Williams (cricketer),England
 23485,Oliver Williams,Oliver Williams (cricketer),England
 23489,Chris Williams,"Chris Williams (cricketer, born 1983)",England
+23490,Jamie Went,Jamie Went,England
 23491,David Wilson,"David Wilson (cricketer, born 1966)",England
 23496,Jonathan Whitney,Jono Whitney,England
 23503,Richard Wilkinson,"Richard Wilkinson (cricketer, born 1982)",England
@@ -12294,7 +12298,7 @@ cricinfo_id,name_en,wikipedia_title,country
 26544,Rashid Ashraf,,India
 26550,Abbas Ali,Abbas Ali (cricketer),India
 26554,Rajinder Amarnath,Rajinder Amarnath,India
-26556,Guru Amonkar,Guru Amonkar,India
+26556,Guru Amonkar,,India
 26567,Amit Asawa,Amit Asawa,India
 26580,CM Ashok Sekhar,C. M. Ashok Sekhar,
 26585,Sandy Aaron,Sandy Aaron,India
@@ -15737,7 +15741,7 @@ cricinfo_id,name_en,wikipedia_title,country
 38476,Herbert Sharp,Herbert Sharp,
 38477,Peter Sharp,Peter Sharp (cricketer),New Zealand
 38478,Murray Sharp,Murray Sharp,New Zealand
-38479,Terence Shaw,Terence Shaw,New Zealand
+38479,Terence Shaw,Terry Shaw (sportsman),New Zealand
 38480,Alfred Sheath,Alfred Sheath,
 38481,James Shepherd,James Shepherd (New Zealand cricketer),New Zealand
 38482,Cliff Shirley,Cliff Shirley,New Zealand
@@ -22344,6 +22348,7 @@ cricinfo_id,name_en,wikipedia_title,country
 252843,Montcin Hodge,Montcin Hodge,West Indies
 252850,Jonathan Barry,Jonathan Barry,
 252854,Garcha Blair,Garcha Blair,
+252858,Andrew Ford,Andrew Ford (cricketer),
 252862,Gregory Taylor,Gregory Taylor (cricketer),
 252869,Stefan Kelly,Stefan Kelly,Bermuda
 252871,Calvin Lewis,Calvin Lewis,West Indies
@@ -28354,6 +28359,7 @@ cricinfo_id,name_en,wikipedia_title,country
 989749,S M Meherob Hasan,SM Meherob,Bangladesh
 989761,Mehedi Hasan,"Mehedi Hasan (cricketer, born 2002)",Bangladesh
 989827,Aks Swadhin,,
+989883,Mahfijul Islam,Mahfijul Islam,
 989889,Zakaria Islam,Zakaria Islam,Bangladesh
 989901,Ashraful Islam Siam,,Bangladesh
 989917,Ariful Haque,,
@@ -28894,6 +28900,7 @@ cricinfo_id,name_en,wikipedia_title,country
 1076553,Baseer Khan,Baseer Khan,Afghanistan
 1076556,Mohammad Sabir,"Mohammad Sabir (cricketer, born 2002)",Afghanistan
 1076558,Zahid Khan,Zahid Khan (cricketer),Afghanistan
+1076568,Faisal Shinozada,Faisal Shinozada,
 1076577,Allah Noor,Allah Noor,Afghanistan
 1076579,Mohammad Ishaq,Mohammad Ishaq (Afghan cricketer),Afghanistan
 1076590,Yousuf Khan,Yousuf Khan (cricketer),Afghanistan
@@ -31677,6 +31684,7 @@ cricinfo_id,name_en,wikipedia_title,country
 1363432,Liam Haskett,Liam Haskett,
 1364157,Wafiullah Tarakhil,,
 1364163,Bashir Ahmad,,
+1364164,Naseer Khan Maroofkhil,Naseer Khan Maroofkhil,
 1364325,Vishen Halambage,Vishen Halambage,
 1364326,Dinura Kalupahana,Dinura Kalupahana,
 1364328,Garuka Sanketh,Garuka Sanketh,

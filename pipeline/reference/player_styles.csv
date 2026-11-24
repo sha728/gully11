@@ -104,7 +104,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 8002,Dominic Thornely,R,R,off-spin,Right-arm mediumRight-arm off spin,1385138452
 8076,Shaun Tait,R,R,fast,Right-arm fast,1386468718
 8119,Adam Voges,R,L,left-arm orthodox,Slow left-arm orthodox,1387107176
-8166,Shane Warne,R,R,leg-spin,Right-arm leg break,1386822660
+8166,Shane Warne,R,R,leg-spin,Right-arm leg break,1387467140
 8180,Shane Watson,R,R,fast-medium,Right-arm fast-medium,1387050042
 8192,Steve Waugh,R,R,medium,Right-arm medium,1385942795
 8231,Brad Williams (cricketer),R,R,fast,Right arm fast,1385118590
@@ -184,7 +184,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 15913,Nick Knight (cricketer),L,R,medium,Right-arm medium,1385118632
 16281,"Jon Lewis (cricketer, born 1975)",R,R,medium,Right arm medium,1385120071
 16362,Mal Loye,R,R,off-spin,Right-arm off spin,1385126155
-16388,Alex Loudon,R,R,off-spin,Right arm off break,1385122587
+16388,Alex Loudon,R,R,off-spin,Right arm off break,1387291187
 16406,Michael Lumb (cricketer),L,R,medium,Right-arm medium,1385134445
 16851,Chris Liddle,R,L,fast-medium,Left-arm fast-medium,1385135065
 16876,Darren Maddy,R,R,medium,Right-arm medium,1385127906
@@ -408,7 +408,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 26151,Danniel Ruyange,R,,,,1385201590
 26156,Michael Ndiko,R,R,off-spin,Right-arm off-spin,1385215399
 26157,Richard Okia,R,R,fast-medium,Right arm fast-medium,1385207962
-26184,Ajit Agarkar,R,R,fast-medium,right-arm fast medium,1385117841
+26184,Ajit Agarkar,R,R,fast-medium,right-arm fast medium,1387437231
 26206,Balachandra Akhil,R,R,fast-medium,Right-arm medium-fast,1385187687
 26236,Love Ablish,R,R,medium,Right-arm medium,1385151945
 26252,Anirudh Singh (cricketer),L,,,,1385217685
@@ -422,7 +422,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 26797,Anand Rajan,R,R,medium,Right-arm Medium,1385186846
 26798,Anirudha Srikkanth,R,,,,1385153378
 26802,Hemang Badani,L,L,left-arm orthodox,Slow left-arm orthodox,1385117846
-26806,Subramaniam Badrinath,R,R,off-spin,Right-arm off break,1385139395
+26806,Subramaniam Badrinath,R,R,off-spin,Right-arm off break,1387451718
 26815,Sairaj Bahutule,L,R,leg-spin,Legbreak,1385123927
 26826,Balaji Rao (Canadian cricketer),L,R,leg-spin,Right-arm leg-break,1385155548
 26829,Lakshmipathy Balaji,R,R,fast-medium,Right-arm fast medium,1385118327
@@ -439,7 +439,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 27783,Ajit Chandila,R,R,off-spin,Right-arm offbreak,1385186520
 28010,Shiv Sunder Das,R,R,medium,Right-arm medium,1385120981
 28067,Pankaj Dharmani,R,,,,1385133153
-28081,MS Dhoni,R,R,medium,Right-arm medium,1387242166
+28081,MS Dhoni,R,R,medium,Right-arm medium,1387369843
 28114,Rahul Dravid,R,R,off-spin,Right arm off break,1387226528
 28146,Deep Dasgupta,R,,,,1385131446
 28160,Paras Dogra,R,R,leg-spin,Legbreak,1385164110
@@ -452,9 +452,9 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 28830,Gnaneswara Rao (cricketer),R,R,medium,Right arm medium,1385214142
 28846,Raiphi Gomez,R,R,fast-medium,Right-arm fast-medium,1385156406
 28997,Karan Goel,L,R,medium,Right-arm medium,1385157310
-29264,Harbhajan Singh,R,R,off-spin,Right-arm off-spin,1385117155
+29264,Harbhajan Singh,R,R,off-spin,Right-arm off-spin,1387442369
 29646,Wasim Jaffer,R,R,off-spin,Right-arm off break,1385123947
-29655,Shadab Jakati,L,L,left-arm orthodox,Slow left-arm orthodox,1385151032
+29655,Shadab Jakati,L,L,left-arm orthodox,Slow left-arm orthodox,1387450834
 29702,Abhishek Jhunjhunwala,R,R,off-spin,Right-arm off-break,1385151720
 29725,Sunil Joshi,L,L,left-arm orthodox,Slow left-arm orthodox,1385118779
 29738,Deepak Joon,L,L,left-arm orthodox,Slow left-arm orthodox,1373783427
@@ -515,7 +515,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 34019,Laxmi Ratan Shukla,R,R,fast-medium,Right-arm medium-fast,1385124102
 34059,Robin Singh (cricketer),L,R,medium,Right-arm medium,1386674525
 34078,Reetinder Singh Sodhi,R,R,fast-medium,Right-arm medium fast,1385122488
-34102,Rohit Sharma,R,R,off-spin,Right-arm off break,1385132688
+34102,Rohit Sharma,R,R,off-spin,Right-arm off break,1387450275
 34105,Javagal Srinath,R,R,fast,Right-arm fast,1385117286
 34118,Sridharan Sriram,L,L,left-arm orthodox,Slow left-arm orthodox,1385132053
 34139,TP Sudhindra,L,R,fast,Right-arm fast,1386843179
@@ -591,7 +591,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 37701,Michael Mason (cricketer),R,R,fast-medium,Right-arm fast-medium,1385123339
 37706,Tim McIntosh (cricketer),L,,,,1385139842
 37712,Craig McMillan,R,R,medium,Right arm medium,1386379171
-37737,Brendon McCullum,R,R,off-spin,Right-arm mediumRight-arm off break,1386458215
+37737,Brendon McCullum,R,R,off-spin,Right-arm mediumRight-arm off break,1387439606
 37740,Kyle Mills,R,R,fast-medium,Right-arm fast-medium,1386465948
 37745,Bruce Martin,R,L,left-arm orthodox,Slow left-arm orthodox,1385126145
 37749,Nathan McCullum,R,R,off-spin,Right-arm off break,1385136201
@@ -612,7 +612,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 38407,Scott Styris,R,R,medium,Right-arm medium,1385118322
 38409,Murphy Su'a,L,L,fast-medium,Left-arm fast-medium,1386386846
 38591,Bradley Scott (cricketer),L,L,fast-medium,Left-arm fast-medium,1385136236
-38605,Craig Smith (cricketer),R,L,medium,Left-arm medium,1385207663
+38605,Craig Smith (cricketer),R,L,medium,Left-arm medium,1387439096
 38607,Will Somerville (cricketer),R,R,off-spin,Right-arm off break,1385142654
 38620,Daryl Tuffey,R,R,fast-medium,Right-arm fast-medium,1386189830
 38699,Ross Taylor,R,R,off-spin,Right-arm off break,1386389405
@@ -654,7 +654,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 40250,Fawad Alam,L,L,left-arm orthodox,Slow left-arm orthodox,1385143807
 40378,Hasan Raza (Sindh cricketer),R,R,off-spin,Right-arm off break,1385124272
 40563,Imran Nazir (cricketer),R,R,off-spin,Right-arm off-spin,1385118281
-40570,Inzamam-ul-Haq,R,L,left-arm orthodox,Slow left-arm orthodox,1385542857
+40570,Inzamam-ul-Haq,R,L,left-arm orthodox,Slow left-arm orthodox,1387325908
 40582,Imran Farhat,L,R,leg-spin,Leg break,1385118271
 40591,Iftikhar Anjum,R,R,medium,Right-arm medium,1385124355
 40618,Imran Tahir,R,R,leg-spin,Right-arm leg break,1386002009
@@ -696,7 +696,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 42632,Shabbir Ahmed (cricketer),R,R,fast-medium,Right-arm fast-medium,1385117889
 42639,Shahid Afridi,R,R,leg-spin,Right-arm leg spin,1386462658
 42646,Shahid Nazir,R,R,fast-medium,Right-arm fast-medium,1385131856
-42655,Shoaib Akhtar,R,R,fast,Right-arm fast,1385117315
+42655,Shoaib Akhtar,R,R,fast,Right-arm fast,1387421507
 42657,Shoaib Malik,R,R,off-spin,Right-arm off break,1385118289
 42668,Saad Janjua,R,R,medium,Right-arm medium,1385167356
 42683,Salman Butt,L,R,off-spin,Right-arm off spin,1385124639
@@ -863,7 +863,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 49363,Thilina Kandamby,L,R,leg-spin,Right arm leg break,1386053041
 49477,Kosala Kulasekara,R,R,fast-medium,Right-arm fast medium,1385182015
 49493,Chanaka Komasaru,L,L,left-arm orthodox,Slow left arm Orthodox,1385232092
-49535,Nuwan Kulasekara,R,R,fast-medium,Right-arm fast-medium,1387130797
+49535,Nuwan Kulasekara,R,R,fast-medium,Right-arm fast-medium,1387357632
 49557,Kaushal Lokuarachchi,R,R,leg-spin,Right arm leg spin,1385125127
 49598,Chamila Gamage,R,R,fast-medium,Right-arm fast-medium,1385125028
 49619,Suranga Lakmal,R,R,fast-medium,Right-arm fast-medium,1385156960
@@ -1035,7 +1035,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 55782,Gregory Strydom,R,R,medium,Right-arm medium,1385134201
 55787,Vusi Sibanda,R,R,medium,Right-arm medium,1385118296
 55805,Tatenda Taibu,R,R,medium,Right-arm medium,1385118033
-55814,Brendan Taylor,R,R,off-spin,Right-arm off break,1385956121
+55814,Brendan Taylor,R,R,off-spin,Right-arm off break,1387481525
 55820,Prosper Utseya,R,R,off-spin,Right arm off break,1385122979
 55822,Mark Vermeulen,R,R,off-spin,Right-arm off break,1385117613
 55848,Guy Whittall,R,R,medium,Right-arm medium,1385120631
@@ -1134,7 +1134,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 214974,Mitch Claydon,L,R,fast-medium,Right-arm medium fast,1385142620
 215058,Stephen Parry (cricketer),R,L,left-arm orthodox,Slow left arm orthodox,1385272439
 215152,Jackson Bird,R,R,fast-medium,Right-arm fast-medium,1385184877
-215155,Usman Khawaja,L,R,off-spin,Right-arm off break,1386719776
+215155,Usman Khawaja,L,R,off-spin,Right-arm off break,1387457605
 216184,Neil Dexter,R,R,medium,Right arm medium,1385126417
 216596,Dan Housego,R,R,leg-spin,Right-arm leg break,1385154405
 217940,Abali Hoilett,R,R,off-spin,Right-arm off break,1385181718
@@ -1334,7 +1334,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 271834,Wasim Bari (Emirati cricketer),R,R,fast-medium,Right-arm medium-fast,1385222842
 272262,Kane Richardson,R,R,fast-medium,Right-arm fast-medium,1387044085
 272279,Nathan Lyon,R,R,off-spin,Right-arm off break,1386010499
-272364,Phillip Hughes,L,R,off-spin,Right-arm off break,1386967527
+272364,Phillip Hughes,L,R,off-spin,Right-arm off break,1387430089
 272385,Josh Lalor,R,L,fast-medium,Left-arm fast-medium,1387043892
 272450,Mitchell Marsh,R,R,medium,Right-arm medium,1387038679
 272465,James Pattinson,L,R,fast-medium,Right-arm fast-medium,1385155462
@@ -1473,7 +1473,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 302208,C. M. Gautam,R,,,,1385183803
 302269,Chris Dent,L,L,left-arm orthodox,Slow left-arm orthodox,1385158987
 302579,Shreevats Goswami,L,R,medium,Right-arm medium,1385150859
-302582,Abhinav Mukund,L,R,leg-spin,"Right-arm leg break, googly",1385151578
+302582,Abhinav Mukund,L,R,leg-spin,"Right-arm leg break, googly",1387439673
 302685,Viliame Yabaki,R,R,leg-spin,Right-arm leg break,1385205767
 302700,Trevor Langa,R,,,,1385204228
 302845,Tony Ura,R,,,,1385172437
@@ -1615,7 +1615,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 322818,Ayabulela Gqamane,R,R,fast-medium,Right-arm fast-medium,1385205376
 323131,Parvinder Awana,R,,,,1385186186
 323244,Rahat Ali (cricketer),R,L,fast-medium,Left-arm fast-medium,1385186448
-323389,Mohammad Rizwan,R,R,medium,Right-arm medium,1386912195
+323389,Mohammad Rizwan,R,R,medium,Right-arm medium,1387353352
 324260,Sarel Erwee,L,R,off-spin,Right-arm off break,1386068161
 324358,Nuwan Pradeep,R,R,fast,Right-arm fast,1385178034
 324444,Amit Paunikar,R,R,medium,Right-arm medium,1385195905
@@ -1692,7 +1692,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 334946,Nizel Fernandes,L,L,left-arm orthodox,Slow left-arm orthodox,1385155634
 335228,Darren Broom,R,R,medium,Right-arm medium,1385162425
 337790,Rassie van der Dussen,R,R,leg-spin,Right arm leg break,1386060731
-337913,Ankeet Chavan,L,L,left-arm orthodox,Slow left-arm orthodox,1385186919
+337913,Ankeet Chavan,L,L,left-arm orthodox,Slow left-arm orthodox,1387454776
 337916,Siddharth Chitnis,R,R,off-spin,Right-arm off break,1370759774
 338987,Abdul Rehman (coach),R,R,fast-medium,Right-arm medium-fast,1385295722
 339095,Dieter Klein,R,L,fast-medium,Left-arm fast-medium,1385222327
@@ -1744,7 +1744,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 348133,Steven Taylor (American cricketer),L,R,off-spin,Right-arm off break,1385182461
 348134,Joshua Gilbert (cricketer),R,R,off-spin,Right-arm off break,1385184291
 348135,Nikhil Dutta,R,R,off-spin,Right-arm off spin,1385824901
-348144,Babar Azam,R,R,off-spin,Right-arm off break,1385187836
+348144,Babar Azam,R,R,off-spin,Right-arm off break,1387434800
 348146,Ahsan Ali (cricketer),R,R,leg-spin,Leg-break,1385224676
 348147,Ahsan Abbasi,R,,,,1385249471
 348148,Mohammad Nawaz (cricketer),L,L,left-arm orthodox,Slow left-arm orthodox,1385209978
@@ -1854,7 +1854,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 377754,Ranjeet Mali,R,R,medium,Right-arm medium,1373797426
 378282,Timroy Allen,R,R,fast-medium,Right-arm fast-medium,1385162736
 378496,Parvez Rasool,R,R,off-spin,Right-arm off break,1385188898
-379140,Devon Conway,L,R,medium,Right-arm medium,1385205666
+379140,Devon Conway,L,R,medium,Right-arm medium,1387290884
 379143,Quinton de Kock,L,,,,1387108117
 379144,Graham Hume,L,R,fast-medium,Right-arm fast-medium,1385222669
 379145,Tabraiz Shamsi,R,L,left-arm wrist-spin,Left-arm unorthodox spin,1385200361
@@ -1881,7 +1881,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 381183,Evan Gulbis,R,R,medium,Right-arm medium,1385169150
 381329,Beau Webster,R,R,off-spin,Right-arm off-break,1385201061
 381734,Fiqre Crockwell,R,,,,1385157220
-381743,Daryl Mitchell (New Zealand cricketer),R,R,medium,Right-arm medium,1386307372
+381743,Daryl Mitchell (New Zealand cricketer),R,R,medium,Right-arm medium,1387291818
 384355,Anaru Kitchen,R,L,left-arm orthodox,Slow left-arm orthodox,1385188431
 384518,Hammad Azam,R,R,fast-medium,Right-arm fast-medium,1385161945
 384525,Zahoor Khan,R,R,fast-medium,Right-arm medium fast,1385228554
@@ -1902,7 +1902,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 388781,Marty Kain,L,L,left-arm orthodox,Left-arm orthodox,1385207573
 388794,Michael Pollard (cricketer),R,,,,1385207682
 388796,Ili Tugaga,L,R,fast-medium,Right-arm medium-fast,1385267839
-388802,Tom Latham (cricketer),L,R,medium,Right-arm medium,1386473697
+388802,Tom Latham (cricketer),L,R,medium,Right-arm medium,1387290573
 389605,Ashish Reddy,R,R,medium,Right-arm medium,1385186288
 389666,Mohammad Abbas (cricketer),R,R,fast-medium,Right-arm medium fast,1386747292
 390478,Arup Das,R,R,fast-medium,Right-arm fast-medium,1370759384
@@ -2028,7 +2028,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 422092,Vikum Sanjaya,R,R,fast-medium,Right-arm fast-medium,1385225962
 422104,Pavan Deshpande,L,R,off-spin,Right-arm offbreak,1385226047
 422106,Abrar Kazi,L,L,left-arm orthodox,Slow left-arm orthodox,1385207214
-422108,KL Rahul,R,,,,1386953199
+422108,KL Rahul,R,,,,1387299907
 422247,James Kettleborough,R,R,off-spin,Right arm off break,1385197716
 422342,Siddhesh Lad,R,R,off-spin,Right-arm off break,1385194901
 422592,Fabian Cowdrey,R,L,left-arm orthodox,Slow left-arm orthodox,1386816931
@@ -2121,7 +2121,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 439423,Angus Robson,R,R,leg-spin,Right-arm leg break,1385195520
 439952,Chris Morris (cricketer),R,R,fast-medium,Right arm fast-medium,1385189566
 440162,Lucas Oluoch,R,L,fast-medium,Left-arm fast-medium,1385182951
-440516,Tom Blundell (cricketer),R,R,off-spin,Right-arm off break,1385207666
+440516,Tom Blundell (cricketer),R,R,off-spin,Right-arm off break,1387292118
 440517,Dane Cleaver,R,R,leg-spin,Right-arm leg break,1385207567
 440518,Jono Hickey,L,R,leg-spin,Leg break,1385453169
 440519,Tim Johnston (cricketer),R,R,off-spin,Right-arm offbreak,1385207548
@@ -2211,7 +2211,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 465327,Innocent Kaia,R,R,leg-spin,Right-arm leg break,1385202969
 465783,Vishwa Fernando,R,L,fast-medium,Left-arm medium-fast,1385205001
 465789,Nisala Tharaka,R,R,fast-medium,Right-arm medium fast,1385228683
-465793,Dhananjaya de Silva,R,R,off-spin,Right-arm off break,1385929931
+465793,Dhananjaya de Silva,R,R,off-spin,Right-arm off break,1387441021
 465797,Tharindu Kaushal,R,R,off-spin,Right-arm off break,1385189672
 467349,Paul Wintz,R,R,fast-medium,Right-arm fast-medium,1385211630
 467402,Michael Raso,L,R,leg-spin,Right-arm leg spin,1385202793
@@ -2274,7 +2274,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 477071,Baba Aparajith,R,R,off-spin,Right arm off break,1385187842
 477074,Ganga Sridhar Raju,L,,,,1385227559
 477161,Rahil Shah,R,L,left-arm orthodox,Slow left-arm orthodox,1385201580
-477335,Vasuki Koushik,R,R,medium,Right-arm medium,1385253949
+477335,Vasuki Koushik,R,R,medium,Right-arm medium,1387396619
 480167,Jafar Jamal,R,R,fast-medium,Right-arm medium fast,1385280298
 480603,Iftikhar Ahmed (cricketer),R,R,off-spin,Right-arm off break,1385206206
 480693,Anthony Bramble,R,,,,1385211716
@@ -2349,7 +2349,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 505118,Meyrick Buchanan,R,,,,1385203522
 505120,Ashton Agar,L,L,left-arm orthodox,Slow left-arm orthodox,1385189326
 505773,Apoorv Wankhade,R,R,medium,Right arm medium,1385229347
-506612,Matt Henry (cricketer),R,R,fast-medium,Right-arm fast-medium,1386901337
+506612,Matt Henry (cricketer),R,R,fast-medium,Right-arm fast-medium,1387293593
 508329,Ben Smith (New Zealand cricketer),R,R,off-spin,Right-arm off break,1385207598
 508442,Abdul Mazid,R,R,off-spin,Right-arm off-spin,1385201747
 508447,Dan Wheeldon,R,R,fast-medium,Right-arm fast-medium,1385174636
@@ -2389,7 +2389,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 520150,Amar Naeem,R,,,,1385196883
 520183,Zeeshan Ashraf (cricketer),L,R,off-spin,Right-arm offbreak,1385243152
 520438,Ivan Thomas,R,R,fast-medium,Right-arm medium-fast,1385190201
-520551,Arron Lilley,R,R,off-spin,Right-arm off-break,1385200065
+520551,Arron Lilley,R,R,off-spin,Right-arm off-break,1387487901
 521170,Lewis McManus,R,,,,1385203016
 521207,Japen Patel,R,R,medium,Right-arm medium,1385202527
 521478,Rayyan Pathan,R,R,fast-medium,Right-arm medium-fast,1385213414
@@ -2488,7 +2488,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 538598,Akshatha Rao,R,R,off-spin,Right-arm offbreak,1385252944
 539304,Babar Hayat,R,R,medium,Right-arm medium,1385196127
 539305,Haseeb Amjad,R,R,fast-medium,Right-arm medium-fast,1385196145
-539511,Henry Nicholls (cricketer),L,R,off-spin,Right-arm off-break,1386878404
+539511,Henry Nicholls (cricketer),L,R,off-spin,Right-arm off-break,1387291129
 539548,Scott Kuggeleijn,R,R,fast-medium,Right-arm fast-medium,1386202397
 540316,Andile Phehlukwayo,L,R,fast-medium,Right-arm medium-fast,1385203703
 540827,Roshan Alam,R,L,left-arm orthodox,Slow left-arm orthodox,1385253660
@@ -2517,7 +2517,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 547763,Ollie Newton,L,R,medium,Right-arm medium,1385225523
 547764,Cam Fletcher,R,,,,1385207542
 547765,Blair Soper,R,L,fast,Left-arm fast,1386377696
-547766,Jacob Duffy,R,R,fast-medium,Right-arm fast-medium,1386901422
+547766,Jacob Duffy,R,R,fast-medium,Right-arm fast-medium,1387293986
 547767,Ryan Duffy (cricketer),R,,,,1385144688
 547768,Donovan Grobbelaar,R,L,medium,Left-arm medium,1385207531
 549288,Ferisco Adams,R,R,fast-medium,Right-arm fast-medium,1385185835
@@ -2538,7 +2538,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 553821,JJ Smit,R,L,fast-medium,Left-arm medium-fast,1385201771
 554066,William Peatfield,R,R,medium,Right-arm Medium,1385204356
 554068,Amjad Mahboob,R,R,medium,Right-arm medium,1385200297
-554159,Abhishek Mohan,L,R,fast-medium,Right arm medium-fast,1385231952
+554159,Abhishek Mohan,L,R,fast-medium,Right arm medium-fast,1387437662
 554178,Varun Sood (cricketer),L,L,left-arm orthodox,Slow left-arm orthodox,1385190370
 554336,Sanjay Majumder,R,,,,1385225842
 554375,Bandeep Singh,R,R,leg-spin,Legbreak googly,1385206542
@@ -2754,7 +2754,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 625954,Jeremy Benton,R,L,left-arm orthodox,Slow left-arm orthodox,1385226016
 625956,Leo Carter,L,R,,Right-arm spin,1385203783
 625959,Shawn Hicks,R,R,fast-medium,Right-arm medium-fast,1386069729
-625960,Kyle Jamieson,R,R,fast-medium,Right-arm fast-medium,1386900702
+625960,Kyle Jamieson,R,R,fast-medium,Right-arm fast-medium,1387293073
 625964,Tim Seifert,R,,,,1386391034
 625967,Ryan Watson (New Zealand cricketer),R,R,medium,Right-arm medium,1385255004
 626111,Salman Faris,L,,,,1385196220
@@ -2827,7 +2827,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 641419,Mickey Edwards (cricketer),R,R,fast-medium,Right-arm fast-medium,1386820476
 641423,Dan Lawrence,R,R,off-spin,Right-arm off break,1386239677
 641801,Will Davis (cricketer),R,R,fast-medium,Right-arm fast-medium,1385204568
-642519,Shreyas Iyer,R,R,leg-spin,Right-arm leg break,1386240540
+642519,Shreyas Iyer,R,R,leg-spin,Right-arm leg break,1387328662
 642523,"Mohammad Saif (cricketer, born 1996)",L,L,left-arm orthodox,Slow left-arm orthodox,1385204590
 642525,Sarfaraz Khan (cricketer),R,R,leg-spin,Legbreak,1385202218
 642531,Ricky Bhui,R,R,leg-spin,Leg-Break googly,1385195917
@@ -2981,7 +2981,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 719717,Aditya Sarwate,R,L,left-arm orthodox,Slow left-arm orthodox,1385207306
 719719,Shahrukh Khan (cricketer),R,R,off-spin,Right-arm off break,1386625386
 720465,Virat Singh,L,R,off-spin,Right-arm offbreak,1385202102
-720471,Ishan Kishan,L,R,leg-spin,"Leg break, Off-break",1385825400
+720471,Ishan Kishan,L,R,leg-spin,"Leg break, Off-break",1387415455
 721041,Dushan Hemantha,R,R,leg-spin,Right-arm legbreak,1385240998
 721853,Sohraab Dhaliwal,R,L,left-arm orthodox,Slow left-arm orthodox,1365490050
 721859,Surendra Malviya,R,R,medium,Right-arm medium,1385218021
@@ -3163,7 +3163,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 822553,Tushar Deshpande,L,R,medium,Right-arm medium,1385223882
 822673,Pratik Das,R,R,off-spin,Right-arm off break,1373796528
 822703,M. D. Nidheesh,R,R,fast-medium,Right-arm fast medium,1385206609
-823509,Glenn Phillips (cricketer),R,R,off-spin,Right arm off-break,1386879818
+823509,Glenn Phillips (cricketer),R,R,off-spin,Right arm off-break,1387292468
 823703,Rajat Patidar,R,R,off-spin,Right-arm off break,1385207926
 824159,Tayyab Tahir,R,R,leg-spin,Leg break,1385207787
 824537,Himesh Ramanayake,R,R,fast-medium,Right-arm medium-fast,1385238732
@@ -3179,7 +3179,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 826679,Sam Heazlett,L,L,left-arm orthodox,Slow left-arm orthodox,1385208018
 826689,Pramod Madushan,R,R,fast-medium,Right arm medium-fast,1385230433
 826869,Shivam Chaudhary,R,R,off-spin,Right-arm off break,1385225289
-826901,Daniel Sams,R,L,fast-medium,Left-arm fast-medium,1385658354
+826901,Daniel Sams,R,L,fast-medium,Left-arm fast-medium,1387436711
 826915,Nathan Ellis,R,R,fast-medium,Right-arm fast-medium,1385244480
 827023,Lo-handre Louwrens,R,,,,1385212131
 827051,Blessing Muzarabani,R,R,fast-medium,Right-arm fast-medium,1385236776
@@ -3341,7 +3341,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 930187,Lakshay Thareja,R,,,,1385244616
 930189,Lalit Yadav (Delhi cricketer),R,R,off-spin,Right-arm offbreak,1385247100
 931019,Promod Maduwantha,L,R,off-spin,Right-arm offbreak,1385227344
-931581,Rishabh Pant,L,R,medium,Right-arm medium,1387064551
+931581,Rishabh Pant,L,R,medium,Right-arm medium,1387298182
 931603,Brendan Doggett,R,R,fast-medium,Right-arm fast-medium,1385926093
 931643,Johnathan Dalton,R,R,medium,Right-arm medium,1385232292
 932355,Ebadot Hossain,R,R,fast,Right-arm fast,1385919319
@@ -3434,9 +3434,9 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 959675,Akash Sudan,L,R,medium,Right arm medium,1385238427
 959759,Finn Allen,R,R,off-spin,Right-arm off break,1386191684
 959761,Zak Gibson,R,R,medium,Right-arm medium,1385215162
-959767,Rachin Ravindra,L,L,left-arm orthodox,Slow left-arm orthodox,1385532238
+959767,Rachin Ravindra,L,L,left-arm orthodox,Slow left-arm orthodox,1387440520
 959769,Ben Sears,R,R,fast-medium,Right-arm medium-fast,1385244984
-959771,Nathan Smith (New Zealand cricketer),R,R,fast-medium,Right-arm medium-fast,1386886059
+959771,Nathan Smith (New Zealand cricketer),R,R,fast-medium,Right-arm medium-fast,1387292795
 959789,Hassan Khan (cricketer),R,L,left-arm orthodox,Left arm orthodox,1385218068
 959823,Charlton Tshuma,R,R,fast-medium,Right-arm fast-medium,1385247852
 959825,Brooke Guest,R,,,,1385243963
@@ -3473,6 +3473,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 982835,Liam Dudding,R,R,fast-medium,Right-arm medium-fast,1385215154
 985497,Muditha Lakshan,R,L,left-arm orthodox,Slow left-arm,1385286900
 989749,SM Meherob,L,R,off-spin,Right-arm off break,1385292094
+989883,Mahfijul Islam,R,R,leg-spin,Right-arm Legbreak,1385838826
 989935,"Shahadat Hossain (cricketer, born 2002)",R,R,off-spin,Right-arm off-break,1385273732
 990023,Tanzid Hasan,L,,,,1386046673
 990031,Towhid Hridoy,R,R,off-spin,Right-arm offbreak,1385846494
@@ -3550,7 +3551,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1046871,Lyndon James,R,R,fast-medium,Right-arm fast-medium,1385243135
 1048739,Sai Kishore,L,L,left-arm orthodox,Slow left-arm orthodox,1385231977
 1048749,Sukumaran Karthik,R,,,,1385254406
-1048813,Narayan Jagadeesan,R,,,,1385224878
+1048813,Narayan Jagadeesan,R,,,,1387447851
 1048835,Ramalingam Rohit,R,R,fast-medium,Right-arm medium-fast,1289898597
 1048841,Sanjay Yadav (cricketer),L,L,left-arm orthodox,Slow left-arm orthodox,1385233398
 1048847,Chezhian Harinishanth,L,R,off-spin,Right-arm off break,1385247684
@@ -3615,7 +3616,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1070063,Dinushka Malan,R,R,fast-medium,Right-arm medium fast,1385240494
 1070154,Nimesh Vimukthi,L,L,left-arm orthodox,Left-arm orthodox spin,1385246080
 1070168,Prithvi Shaw,R,R,off-spin,Right-arm off break,1385194824
-1070173,Shubman Gill,R,R,off-spin,Right-arm off break,1386887738
+1070173,Shubman Gill,R,R,off-spin,Right-arm off break,1387296969
 1070178,Chandan Sahani,R,R,medium,Right-arm medium,1385289618
 1070180,Priyam Garg,R,R,medium,Right-arm medium,1385243410
 1070183,Abhishek Sharma,L,L,left-arm orthodox,Slow left-arm orthodox spin,1385230829
@@ -3647,13 +3648,13 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1072485,Pawan Sarraf,R,R,off-spin,Right-arm off break,1385246952
 1072488,Rohit Paudel,R,R,off-spin,Right-arm offbreak,1385240029
 1072594,Andile Mokgakane,R,R,medium,Right-arm medium,1373333781
-1073106,Abdul Samad (Pakistani cricketer),R,,,,1385226563
+1073106,Abdul Samad (Pakistani cricketer),R,,,,1387389524
 1073111,Ahsan Hafeez,L,L,left-arm orthodox,Slow left-arm orthodox,1385226569
 1074333,Nuwanidu Fernando,R,R,off-spin,Right-arm off break,1385238912
 1075863,Kamil Mishara,L,R,off-spin,Right-arm off-break,1386767991
 1075869,Isitha Wijesundara,L,R,fast-medium,Right arm Fast-Medium,1385255642
 1076376,Liam Scott,R,R,fast-medium,Right-arm fast-medium,1385255229
-1076377,Oliver Davies (cricketer),R,R,off-spin,Right-arm off break,1387209515
+1076377,Oliver Davies (cricketer),R,R,off-spin,Right-arm off break,1387358388
 1076382,Mackenzie Harvey,L,R,medium,Right-arm medium,1385243998
 1076387,Arish Ali Khan,R,L,left-arm orthodox,Slow left-arm orthodox,1385285568
 1076392,Mehran Mumtaz,L,L,left-arm orthodox,Slow left-arm orthodox,1385289460
@@ -3675,7 +3676,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1079234,Conor McInerney,L,L,left-arm orthodox,Slow left-arm orthodox,1385240806
 1079377,Ravi Teja (cricketer),L,R,medium,Right-arm medium,1385229257
 1079378,Palakodeti Sairam,R,R,off-spin,Right-arm off break,1385238421
-1079380,Nikhil Chaudhary (cricketer),R,R,off-spin,Right-arm off break,1387234246
+1079380,Nikhil Chaudhary (cricketer),R,R,off-spin,Right-arm off break,1387365638
 1079382,Rohan Kunnummal,R,R,off-spin,Right-arm off-break,1385231070
 1079434,Riyan Parag,R,R,leg-spin,"Right-arm off break, leg break",1385229228
 1079435,Jitumoni Kalita,R,R,leg-spin,Legbreak,1385239983
@@ -3780,7 +3781,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1102235,Morne Bauer,R,R,fast-medium,Right-arm medium-fast,1385235046
 1103905,Toby Pettman,R,R,fast-medium,Right-arm medium-fast,1385259453
 1104168,Arslan Anwar,R,R,,Right-arm,1385201879
-1104697,Scott Currie,R,R,fast-medium,Right-arm medium-fast,1385262104
+1104697,Scott Currie,R,R,fast-medium,Right-arm medium-fast,1387348681
 1104703,Fred Klaassen,R,L,fast-medium,Left-arm medium-fast,1385235067
 1104893,Nico Reifer,R,R,medium,Right-arm medium,1385286700
 1104894,Tom Bevan (cricketer),R,R,off-spin,Right-arm off break,1385293683
@@ -3819,7 +3820,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1115928,Alexander Haggan,R,R,fast-medium,Right-arm fast-medium,1385235689
 1118837,Zechariah Shem,R,R,fast-medium,Right-arm medium fast,1385248957
 1119008,Shubhang Hegde,L,L,left-arm orthodox,Slow left arm orthodox,1385246680
-1119026,Devdutt Padikkal,L,R,off-spin,Right-arm off break,1386901842
+1119026,Devdutt Padikkal,L,R,off-spin,Right-arm off break,1387297847
 1120259,Josh Rymell,R,,,,1385286587
 1120355,Shahid Ahmadzai,L,L,left-arm orthodox,Slow left-arm orthodox,1387177984
 1120613,Johnathan Campbell,L,R,leg-spin,Leg spin,1385236287
@@ -3839,7 +3840,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1123428,Usman Khan (cricketer),R,R,off-spin,Right-arm off-break,1385236975
 1123718,Spencer Johnson (cricketer),L,L,fast,Left-arm fast,1385236980
 1123787,Robiul Haque,R,R,fast-medium,Right-arm medium-fast,1385237003
-1124282,Josh Philippe,R,,,,1385239020
+1124282,Josh Philippe,R,,,,1387485547
 1124283,Aaron Hardie,R,R,fast-medium,Right-arm medium-fast,1385246735
 1124285,Andrew Holder,R,R,fast-medium,Right-arm fast-medium,1385238115
 1124288,Jarrod Freeman,R,R,off-spin,Right-arm off break,1385240369
@@ -3975,7 +3976,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1151271,Sameer Choudhary,R,R,off-spin,Right arm off break,1385254612
 1151273,Nehal Wadhera,L,R,leg-spin,Right-arm Legbreak,1385295839
 1151275,Mohit Jangra,L,L,fast-medium,Left-arm medium-fast,1385248297
-1151278,Yashasvi Jaiswal,L,R,leg-spin,Right-arm leg break,1387012960
+1151278,Yashasvi Jaiswal,L,R,leg-spin,Right-arm leg break,1387354415
 1151286,Manimaran Siddharth,R,L,left-arm orthodox,Slow left arm orthodox,1385255110
 1151288,Sai Sudharsan,L,R,leg-spin,Right-arm leg break,1385288959
 1151616,Joe Gordon (cricketer),R,R,medium,Right-arm medium,1385286362
@@ -4157,7 +4158,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1175480,Tejas Patel (cricketer),R,R,medium,Right arm medium,1385247697
 1175484,Mujtaba Yousuf,L,L,fast-medium,Left-arm medium-fast,1385247885
 1175485,Abdul Samad (Indian cricketer),R,R,leg-spin,Right-arm leg break,1385247727
-1175488,Dhruv Jurel,R,,,,1386888167
+1175488,Dhruv Jurel,R,,,,1387298877
 1175489,Sameer Rizvi,R,R,off-spin,Right arm off break,1385256752
 1175490,"Shivam Sharma (cricketer, born 1995)",R,L,left-arm orthodox,Slow left arm orthodox,1385280490
 1175495,Karan Lal,R,R,off-spin,Right-arm off break,1385298967
@@ -4336,7 +4337,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1216158,Aman Mokhade,R,R,leg-spin,Right-arm legbreak,1385300047
 1216159,Harsh Dubey,L,L,left-arm orthodox,Slow left-arm orthodox,1385280647
 1216167,Praful Hinge,R,R,fast-medium,Right-arm medium-fast,1385300467
-1216350,Wil Parker,R,R,leg-spin,Right-arm leg break,1385257115
+1216350,Wil Parker,R,R,leg-spin,Right-arm leg break,1387321082
 1216919,Abdul Nasir (Balochistan cricketer),R,R,off-spin,Right-arm off break,1385257214
 1217156,Ravindu Fernando,R,R,off-spin,Right arm off break,1385260091
 1217487,Mubasir Khan,R,R,off-spin,Right-arm off-break,1387254045
@@ -4481,7 +4482,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1283583,Ashmit Shreshta,R,,,,1385295029
 1283740,Ihsanullah (Pakistani cricketer),R,R,fast,Right-arm fast,1385290549
 1287032,Naman Dhir,R,R,off-spin,Right-arm off break,1386044727
-1287033,Gurnoor Brar,L,R,fast,Right-Arm fast,1385468499
+1287033,Gurnoor Brar,L,R,fast,Right-Arm fast,1387442257
 1287056,Trishank Gupta,R,R,leg-spin,Right-arm leg break,1385289630
 1287067,Abdul Basith (cricketer),R,R,off-spin,Right-arm off-break,1385165234
 1290587,Basir Ahamad,L,L,left-arm orthodox,Slow left-arm orthodox,1385825398
@@ -4503,11 +4504,11 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1295842,Campbell Kellaway,L,L,left-arm orthodox,Left-arm orthodox,1385291307
 1295844,Jack Nisbet (cricketer),R,R,fast-medium,Right-arm fast medium,1385296482
 1295845,Will Salzmann,R,R,fast-medium,Right-arm fast-medium,1386824198
-1295846,Lachlan Shaw (cricketer),R,,,,1387007423
+1295846,Lachlan Shaw (cricketer),R,,,,1387320717
 1295847,Tom Whitney (cricketer),R,R,fast-medium,Right-arm fast-medium,1385295230
 1295848,Teague Wyllie,R,,,,1385291386
 1295849,Liam Blackford,L,,,,1385300488
-1295851,Joel Davies,L,L,left-arm orthodox,Slow left-arm orthodox,1387041548
+1295851,Joel Davies,L,L,left-arm orthodox,Slow left-arm orthodox,1387320667
 1295879,John Kariko,L,L,left-arm orthodox,Left-arm orthodox spin,1385295680
 1295902,Ghazi Ghori,R,,,,1386400156
 1295903,Kevin Wickham (cricketer),R,R,off-spin,Right-arm off-break,1385297765
@@ -4538,7 +4539,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1325632,Hassan Eisakhil,R,,,,1386533763
 1326798,Allah Ghazanfar,R,R,off-spin,Right arm off spin,1385295147
 1328438,Sabir Ali (Emirati cricketer),R,L,fast-medium,Left-arm fast-medium,1385293619
-1329697,Sufyan Moqim,L,L,left-arm wrist-spin,Left-arm wrist spin,1385297722
+1329697,Sufyan Moqim,L,L,left-arm wrist-spin,Left-arm wrist spin,1387444069
 1329699,Khawaja Nafay,R,R,off-spin,Right-arm Offbreak,1385295783
 1330163,Josh Hull (cricketer),L,L,fast-medium,Left-arm fast medium,1385295790
 1331347,Hunain Shah,R,R,fast-medium,Right-arm fast medium,1385294805
@@ -4561,7 +4562,7 @@ cricinfo_id,wikipedia_title,batting_hand,bowling_arm,bowling_type,bowling_raw,re
 1339014,Avinov Choudhury,R,L,left-arm orthodox,Slow left-arm orthodox,1385295062
 1339104,Saad Masood,R,R,leg-spin,Right-arm leg spin,1385299541
 1339138,"Ali Raza (cricketer, born 2008)",R,R,fast,Right-arm fast,1385646748
-1339355,Azan Awais,L,,,,1385299105
+1339355,Azan Awais,L,,,,1387304407
 1339698,Suryansh Shedge,R,R,medium,Right-arm medium,1387152531
 1340422,Sakib Hussain,R,R,fast-medium,Right-arm fast-medium,1375585137
 1342166,Pushkar Sharma (cricketer),L,L,fast-medium,Left-arm medium-fast,1385503244

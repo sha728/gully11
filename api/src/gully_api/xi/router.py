@@ -18,6 +18,8 @@ from pydantic import BaseModel, Field
 
 from ..db import get_conn
 from ..sim import captaincy
+from ..sim.awards import player_of_series, with_award
+from ..sim.rates import load_env
 from . import service
 from .draft import Draft, reel
 from .service import FORMATS, DraftError
@@ -248,6 +250,14 @@ def challenge(slug: str, conn=Depends(get_conn)) -> dict[str, Any]:
         row["captain"] = row["picks"].get("captain")
         row["picks"], row["slots"] = row["picks"]["ids"], row["picks"]["slots"]
     row["captains"] = (row["result"] or {}).get("captains")
+    if row["result"] is not None and "player_of_series" not in row["result"]:
+        # Played before awards existed: work them out from the saved matches.
+        full = [with_award(r["match_json"]) for r in conn.execute(
+            "SELECT match_json FROM sim_results WHERE context = 'xi' AND ref = %s ORDER BY match_no", (slug,))]
+        if full:
+            row["result"]["player_of_series"] = player_of_series(full, load_env(full[0]["env"]).is_test)
+            for m, f in zip(row["matches"] or [], full):
+                m["player_of_match"] = f["player_of_match"]
     return row
 
 
@@ -258,7 +268,7 @@ def challenge_match(slug: str, n: int, conn=Depends(get_conn)) -> dict[str, Any]
                        (slug, n)).fetchone()
     if row is None:
         raise HTTPException(404, "Match not found")
-    return row["match_json"]
+    return with_award(row["match_json"])
 
 
 # ------------------------------------------------------------------ daily leaderboard

@@ -15,6 +15,7 @@ league stage is over.
 
 from __future__ import annotations
 
+from ..sim.awards import impact, player_of_match
 from ..sim.engine import Team, simulate_match
 from ..sim.rates import Env
 from .schedule import league, playoff_plan
@@ -38,6 +39,7 @@ def _summary(n: int, stage: str, m, lineups: dict) -> dict:
                    for i in d["innings"]],
         "top_scorer": {"name": top["name"], "runs": top["runs"], "balls": top["balls"]},
         "best_bowler": {"name": best["name"], "wickets": best["wickets"], "runs": best["runs"]},
+        "player_of_match": d["player_of_match"],
         "lineups": lineups,                     # the XIs used: {franchise: {"xi", "impact"}}
     }
 
@@ -120,7 +122,19 @@ def next_fixture(state: dict) -> dict | None:
 
 
 def add_to_tally(state: dict, full: dict) -> None:
-    """Add one match's batting and bowling to the running cap tallies."""
+    """Add one match's batting and bowling to the running cap tallies, and each
+    player's impact (see sim/awards.py) to the player-of-the-season race."""
+    mvp = state["tally"].setdefault("impact", {})
+    for pid, p in impact(full, is_test=False).items():
+        t = mvp.setdefault(pid, {"name": p["name"], "team": p["team"], "score": 0.0, "matches": 0,
+                                 "runs": 0, "wickets": 0, "awards": 0})
+        t["score"] = round(t["score"] + p["score"], 1)
+        t["matches"] += 1
+        t["runs"] += p["runs"]
+        t["wickets"] += p["wickets"]
+    pom = full.get("player_of_match") or player_of_match(full, is_test=False)   # older saved matches
+    if pom and pom["id"] in mvp:
+        mvp[pom["id"]]["awards"] += 1
     for inn in full["innings"]:
         for bt in inn["batting_card"]:
             if bt["how_out"]:
@@ -144,7 +158,9 @@ def _caps(state: dict) -> dict:
                      for k, v in t["runs"].items()), key=lambda r: (-r["runs"], r["balls"]))[:5]
     purple = sorted(({"id": k, **v, "econ": round(6 * v["runs"] / v["balls"], 2) if v.get("balls") else None}
                      for k, v in t["wickets"].items()), key=lambda r: (-r["wickets"], r["runs"]))[:5]
-    return {"orange": orange, "purple": purple}
+    mvp = sorted(({"id": k, **v} for k, v in t.get("impact", {}).items()),
+                 key=lambda r: (-r["score"], -r["awards"], r["name"]))[:5]
+    return {"orange": orange, "purple": purple, "mvp": mvp}
 
 
 def play_next(state: dict, teams: dict[str, Team], lineups: dict[str, dict], env: Env) -> dict | None:

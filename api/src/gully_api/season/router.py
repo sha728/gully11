@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..db import get_conn
+from ..sim.awards import with_award
 from . import service as S
 
 router = APIRouter(prefix="/rooms/{code}/season", tags=["season"])
@@ -91,4 +92,4 @@ def match(code: str, n: int, conn=Depends(get_conn)) -> dict[str, Any]:
                        (code.upper(), n)).fetchone()
     if row is None:
         raise HTTPException(404, "No such match.")
-    return row["match_json"]
+    return with_award(row["match_json"])

@@ -19,6 +19,7 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .awards import player_of_match
 from .commentary import describe
 from .profiles import WICKET_ROLES, Profile, expected
 from .rates import RUNS, Env, load_env
@@ -155,13 +156,15 @@ class MatchResult:
     super_overs: list[Innings] = field(default_factory=list)   # in order played (pairs)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "seed": self.seed, "env": self.env, "teams": list(self.teams),
             "innings": [i.to_dict() for i in self.innings],
             "winner": self.winner, "margin": self.margin, "result": self.result,
             "commentary": self.commentary, "win_prob": self.win_prob, "toss": self.toss,
             "super_overs": [i.to_dict() for i in self.super_overs],
         }
+        d["player_of_match"] = player_of_match(d, load_env(self.env).is_test)
+        return d
 
 
 # ------------------------------------------------------------------ helpers

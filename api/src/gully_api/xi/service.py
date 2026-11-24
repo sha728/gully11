@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ..settings import settings
 from ..sim import captaincy
+from ..sim.awards import player_of_series
 from ..sim import Profile, Team, attach_matchups, from_legend, from_phase_rows, load_env, simulate_match, simulate_test
 
 FULL_MEMBERS = ["India", "Australia", "England", "South Africa", "New Zealand", "Pakistan",
@@ -426,14 +427,16 @@ def play_series(conn, fmt: str, seed: int, picks: list[str], slots: list[int],
         return {"id": team.captain, "name": p.name if p else None, "rating": team.captaincy,
                 "record": captaincy.summary(team.captain, fmt) if team.captain else None}
 
+    full = [m.to_dict() for m in matches]
     return {
         "slug": challenge_slug(fmt, seed, picks, slots, captain),
         "format": fmt, "seed": seed, "picks": picks, "slots": slots, "opponent": them.name,
         "captains": {"mine": lead(mine), "them": lead(them)},
         "xi": [{**r, "order": r["slot"]} for r in ordered],
-        "result": {**tally, "verdict": verdict},
-        "matches": [_summary(m, i + 1) for i, m in enumerate(matches)],
-        "_full": [m.to_dict() for m in matches],
+        "result": {**tally, "verdict": verdict,
+                   "player_of_series": player_of_series(full, env.is_test)},
+        "matches": [_summary(d, i + 1) for i, d in enumerate(full)],
+        "_full": full,
     }
 
 
@@ -443,8 +446,7 @@ def run_difference(matches: list[dict], mine: str = "Your XI") -> int:
     return sum(s["runs"] if s["team"] == mine else -s["runs"] for m in matches for s in m["scores"])
 
 
-def _summary(m, n: int) -> dict:
-    d = m.to_dict()
+def _summary(d: dict, n: int) -> dict:
     top = max((b for inn in d["innings"] for b in inn["batting_card"]), key=lambda b: b["runs"])
     best = max((b for inn in d["innings"] for b in inn["bowling_card"]),
                key=lambda b: (b["wickets"], -b["runs"]))
@@ -454,4 +456,5 @@ def _summary(m, n: int) -> dict:
                     "declared": i.get("declared", False)} for i in d["innings"]],
         "top_scorer": {"name": top["name"], "runs": top["runs"], "balls": top["balls"]},
         "best_bowler": {"name": best["name"], "wickets": best["wickets"], "runs": best["runs"]},
+        "player_of_match": d["player_of_match"],
     }

@@ -88,6 +88,16 @@ export default async function SeriesPage({ params, searchParams }: Props) {
         { label: "Opponent", value: c.opponent.replace(/^All-time /, ""), hint: XI_COPY[c.format].title },
       ]} />
 
+      {r.player_of_series && (
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-y py-4">
+          <span className="label">Player of the series</span>
+          <span className="font-display text-2xl font-bold uppercase">{r.player_of_series.name}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {r.player_of_series.team === MINE ? "Your XI" : c.opponent.replace(/^All-time /, "")} · {r.player_of_series.figures}
+          </span>
+        </div>
+      )}
+
       {c.daily && <DailyRank format={c.format} day={c.daily} slug={c.slug} />}
 
       <Section n={1} title="The series" aside={<Link href={`/xi/c/${c.slug}/match/1`} className="hover:text-foreground">watch it ball by ball →</Link>}>
@@ -192,7 +202,15 @@ function MatchCard({ m, slug, them }: { m: MatchSummary; slug: string; them: str
       </div>
       <div className="mt-auto border-t pt-2 text-[11px] leading-snug text-muted-foreground">
         <div className="truncate">{m.margin}</div>
-        <div className="truncate">Top score: {m.top_scorer.name} {m.top_scorer.runs} ({m.top_scorer.balls})</div>
+        {m.player_of_match ? (
+          <div className="pt-1">
+            <div className="font-mono text-[10px] tracking-wide uppercase">Player of the match</div>
+            <div className="truncate font-medium text-foreground">{m.player_of_match.name}</div>
+            <div className="truncate font-mono">{m.player_of_match.figures}</div>
+          </div>
+        ) : (
+          <div className="truncate">Top score: {m.top_scorer.name} {m.top_scorer.runs} ({m.top_scorer.balls})</div>
+        )}
       </div>
     </Link>
   );

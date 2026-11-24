@@ -182,6 +182,7 @@ def test_season_end_to_end():
         assert m["innings"] and m["commentary"]
 
 
+@pytest.mark.skipif(not _db_loaded(), reason="Postgres not running or not loaded")
 def test_season_waits_for_a_captains_bowling_change():
     from fastapi.testclient import TestClient
 
